@@ -89,6 +89,9 @@ shared keys (section 18).
 
 ### Who opens the connection: push, pull, query
 
+In every diagram of this document and of the deck, **an arrow starts at the caller**. For a pull
+or a query the data then flows back in the response, against the arrow.
+
 | Data | Direction of data | Who opens the connection | Mechanism |
 |---|---|---|---|
 | Envoy metrics → Prometheus | sidecar → Prometheus | **Prometheus (pull)** | HTTP GET `:15020/stats/prometheus` every 15 s |
@@ -107,8 +110,12 @@ shared keys (section 18).
 
 Three signals leave every hop of a transaction. **Metrics are pulled** (Prometheus scrapes
 each sidecar). **Traces and logs are pushed** over OTLP to one OpenTelemetry Collector, which
-pushes them on to Tempo and Loki. **Views query** the stores on demand. In the diagram, solid
-arrows are pushes or pulls (label says which), dotted arrows are queries. All three carry the same keys (source, destination, journey,
+pushes them on to Tempo and Loki. **Views query** the stores on demand.
+
+**Arrow convention (all diagrams): an arrow starts at the caller**, the side that opens the
+connection. For PUSH the data travels along the arrow; for PULL (Prometheus scraping a sidecar)
+and QUERY (a view reading a store) the data comes back against the arrow, in the response.
+Unlabelled arrows are hand-offs inside one process. Dotted arrows are queries. All three carry the same keys (source, destination, journey,
 trace ID), which is what lets every view jump from one signal to another.
 
 ```mermaid
@@ -119,12 +126,12 @@ flowchart LR
     ISTIOD[istiod]
   end
   subgraph COL[Collection]
-    PM[PodMonitor / ServiceMonitor]
-    OTLP[OTLP gRPC 4317 / HTTP 4318]
+    SCR[Prometheus scrape<br/>targets from PodMonitor / ServiceMonitor]
+    OTLP[OTLP receiver<br/>gRPC 4317 / HTTP 4318]
   end
   subgraph PROC[Processing]
-    PROMR[Prometheus rules]
-    OC[OTel Collector: journey tagging, tail sampling, batching]
+    PROMR[Prometheus ingest + rules]
+    OC[OTel Collector:<br/>journey tagging, tail sampling, batching]
   end
   subgraph STORE[Storage]
     TSDB[(Prometheus TSDB)]
@@ -137,19 +144,19 @@ flowchart LR
     RD[Red-dot dashboard]
     AM[Alertmanager]
   end
-  ENV -->|"PULL: scraped :15020"| PM --> TSDB
-  ISTIOD -->|"PULL: scraped :15014"| PM
-  ENV -->|"PUSH: spans (OTLP)"| OTLP
+  SCR -->|"PULL: GET :15020"| ENV
+  SCR -->|"PULL: GET :15014"| ISTIOD
+  SCR --> PROMR -->|writes| TSDB
+  PROMR -->|"PUSH: alerts"| AM
+  ENV -->|"PUSH: spans + access logs (OTLP)"| OTLP
   AGT -->|"PUSH: spans (OTLP)"| OTLP
-  ENV -->|"PUSH: access logs (OTLP)"| OTLP
   OTLP --> OC
   OC -->|"PUSH: traces (OTLP)"| TEMPO
   OC -->|"PUSH: logs (OTLP/HTTP)"| LOKI
-  TSDB --> PROMR -->|"PUSH: alerts"| AM
-  TSDB -.->|"QUERY: PromQL"| KIALI & GRAF & RD
-  TEMPO -.->|"QUERY: TraceQL"| KIALI & GRAF & RD
-  LOKI -.->|"QUERY: LogQL"| GRAF & RD
-  AM -.->|"QUERY: API v2"| RD
+  KIALI & GRAF & RD -.->|"QUERY: PromQL"| TSDB
+  KIALI & GRAF & RD -.->|"QUERY: TraceQL"| TEMPO
+  GRAF & RD -.->|"QUERY: LogQL"| LOKI
+  RD -.->|"QUERY: API v2"| AM
 ```
 
 The mesh provides the hop-level view for free: every pod already has an Envoy sidecar, so
@@ -247,12 +254,12 @@ sequenceDiagram
   participant K as Kubernetes API
   participant E as Envoy sidecar :15020
   participant AM as Alertmanager
-  CR->>OP: watched
-  OP->>P: generates scrape config (secret), reloads
+  OP->>CR: watch PodMonitor / ServiceMonitor
+  OP->>P: write scrape config (secret), trigger reload
   P->>K: pod service discovery (list/watch pods)
   loop every 15 s
-    P->>E: GET /stats/prometheus
-    E-->>P: counters + histograms per hop
+    P->>E: GET /stats/prometheus (Prometheus is the caller)
+    E-->>P: response: counters + histograms per hop
   end
   P->>P: append to TSDB head + WAL
   loop every 15 s
@@ -623,7 +630,7 @@ Correlation works because the three signals share keys:
 | **Journey** (baggage → label/attribute/field) | metrics, spans, access logs | filter all three to one customer journey |
 | **Time window** | all | narrow every search to the minutes of the incident |
 
-Following the "core banking slow" failure:
+Following the "core banking slow" failure (arrows are investigation steps, not network calls):
 
 ```mermaid
 flowchart LR
