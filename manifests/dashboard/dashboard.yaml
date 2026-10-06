@@ -1,0 +1,84 @@
+# Red-dot dashboard (backend + UI). Outside the mesh on purpose: it is a monitoring tool,
+# so its own calls must not show up in the service graph it draws.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dashboard
+---
+# Read-only access to Service / ServiceEntry annotations (display name, owner team).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: red-dot
+  namespace: dashboard
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: red-dot-topology-reader
+rules:
+  - apiGroups: [""]
+    resources: [services]
+    verbs: [get, list]
+  - apiGroups: [networking.istio.io]
+    resources: [serviceentries]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: red-dot-topology-reader
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: red-dot-topology-reader }
+subjects: [{ kind: ServiceAccount, name: red-dot, namespace: dashboard }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: red-dot
+  namespace: dashboard
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: red-dot } }
+  template:
+    metadata:
+      labels: { app: red-dot }
+    spec:
+      serviceAccountName: red-dot
+      containers:
+        - name: red-dot
+          image: red-dot-dashboard:poc
+          imagePullPolicy: IfNotPresent
+          ports: [{ name: http, containerPort: 8088 }]
+          env:
+            # In-cluster endpoints. On OpenShift: PROM_URL = Thanos Querier
+            # (https://thanos-querier.openshift-monitoring.svc:9091) with a bearer token.
+            - { name: PROM_URL, value: "http://kps-prometheus.monitoring.svc.cluster.local:9090" }
+            - { name: TEMPO_URL, value: "http://tempo-tempo.tracing.svc.cluster.local:3200" }
+            - { name: LOKI_URL, value: "http://loki.logging.svc.cluster.local:3100" }
+            - { name: ALERTMANAGER_URL, value: "http://kps-alertmanager.monitoring.svc.cluster.local:9093" }
+            # Links shown in the browser
+            - { name: GRAFANA_PUBLIC_URL, value: "http://localhost:13000" }
+            - { name: KIALI_PUBLIC_URL, value: "http://localhost:20001/kiali" }
+            - { name: PROM_PUBLIC_URL, value: "http://localhost:19090" }
+            - { name: ALERTMANAGER_PUBLIC_URL, value: "http://localhost:19093" }
+            # Fault-injection admin API of the external mocks (POC only)
+            # Topology discovery: hops seen in this window; workloads treated as gateways
+            - { name: DISCOVERY_WINDOW, value: "15m" }
+            - { name: GATEWAY_WORKLOADS, value: "istio-ingressgateway" }
+            - { name: MOCK_ADMIN_TEMPLATE, value: "http://{name}.poc.internal:9000" }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+          resources:
+            requests: { cpu: 20m, memory: 48Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: red-dot
+  namespace: dashboard
+spec:
+  type: NodePort        # kind only: http://localhost:18088 (OpenShift: Route)
+  selector: { app: red-dot }
+  ports:
+    - { name: http, port: 8088, targetPort: http, nodePort: 30088 }

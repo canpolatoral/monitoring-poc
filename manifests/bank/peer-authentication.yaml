@@ -1,0 +1,8 @@
+# Only mesh workloads (with a mesh identity) may call the bank services; plaintext is refused.
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+spec:
+  mtls:
+    mode: STRICT

@@ -1,0 +1,66 @@
+# Istio control plane via the Sail Operator (the upstream of OpenShift Service Mesh 3).
+# On OpenShift the same CRs are served by the OSSM 3 operator (sailoperator.io/v1).
+apiVersion: sailoperator.io/v1
+kind: IstioCNI
+metadata:
+  name: default
+spec:
+  version: v1.30.5
+  namespace: istio-cni
+---
+apiVersion: sailoperator.io/v1
+kind: Istio
+metadata:
+  name: default            # revision "default" => namespaces opt in with istio-injection=enabled
+spec:
+  version: v1.30.5
+  namespace: istio-system
+  updateStrategy:
+    type: InPlace
+  values:
+    pilot:
+      cni:
+        enabled: true      # OpenShift always uses Istio CNI (no NET_ADMIN init containers); mirror it here
+      resources:
+        requests: { cpu: 100m, memory: 256Mi }
+    global:
+      proxy:
+        resources:
+          requests: { cpu: 20m, memory: 64Mi }
+          limits:   { cpu: 500m, memory: 256Mi }
+    meshConfig:
+      # Phase 1 design: keep ALLOW_ANY and use PassthroughCluster in Kiali to find undeclared dependencies.
+      outboundTrafficPolicy:
+        mode: ALLOW_ANY
+      defaultConfig:
+        holdApplicationUntilProxyStarts: true
+      enableTracing: true
+      # Providers referenced by the Telemetry API (manifests/mesh/telemetry.yaml).
+      extensionProviders:
+        - name: otel-tracing                    # Envoy spans -> OTel Collector -> Tempo
+          opentelemetry:
+            service: otel-collector.observability.svc.cluster.local
+            port: 4317
+        - name: otel-als                        # Envoy access logs -> OTel Collector -> Loki
+          envoyOtelAls:
+            service: otel-collector.observability.svc.cluster.local
+            port: 4317
+            logName: envoy-access
+            logFormat:
+              text: "[%START_TIME%] \"%REQ(:METHOD)% %REQ(X-ENVOY-ORIGINAL-PATH?:PATH)%\" %RESPONSE_CODE% %RESPONSE_FLAGS% %UPSTREAM_CLUSTER% %DURATION%ms"
+              labels:
+                workload: "%ENVIRONMENT(ISTIO_META_WORKLOAD_NAME)%"
+                namespace: "%ENVIRONMENT(POD_NAMESPACE)%"
+                method: "%REQ(:METHOD)%"
+                path: "%REQ(X-ENVOY-ORIGINAL-PATH?:PATH)%"
+                authority: "%REQ(:AUTHORITY)%"
+                response_code: "%RESPONSE_CODE%"
+                response_flags: "%RESPONSE_FLAGS%"
+                response_code_details: "%RESPONSE_CODE_DETAILS%"
+                upstream_cluster: "%UPSTREAM_CLUSTER%"
+                upstream_host: "%UPSTREAM_HOST%"
+                upstream_failure: "%UPSTREAM_TRANSPORT_FAILURE_REASON%"
+                duration_ms: "%DURATION%"
+                upstream_service_time_ms: "%RESP(X-ENVOY-UPSTREAM-SERVICE-TIME)%"
+                trace_id: "%TRACE_ID%"
+                baggage: "%REQ(BAGGAGE)%"

@@ -1,0 +1,10 @@
+# Local tools, kubeconfig and Helm state: never commit (CLAUDE.md rules).
+.tools/
+*.kubeconfig
+kubeconfig
+.env
+.DS_Store
+__pycache__/
+
+# Local editor settings
+.vscode/

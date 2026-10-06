@@ -1,0 +1,19 @@
+# Auto-instrumentation for the bank namespace (no tracing code in the apps).
+# Pods opt in with: instrumentation.opentelemetry.io/inject-python: "true"
+# (Java services would use inject-java and get JDBC spans the same way.)
+apiVersion: opentelemetry.io/v1alpha1
+kind: Instrumentation
+metadata:
+  name: bank-auto
+  namespace: bank          # one Instrumentation per app namespace (copy and change this to reuse)
+spec:
+  exporter:
+    endpoint: http://otel-collector.observability.svc.cluster.local:4318
+  propagators: [tracecontext, baggage]     # baggage carries the journey to every hop
+  sampler:
+    type: parentbased_always_on            # follow the decision made at the gateway
+  python:
+    env:
+      - { name: OTEL_METRICS_EXPORTER, value: none }   # mesh metrics already cover RED
+      - { name: OTEL_LOGS_EXPORTER, value: none }
+      - { name: OTEL_PYTHON_DISABLED_INSTRUMENTATIONS, value: "urllib3" }  # requests already traced

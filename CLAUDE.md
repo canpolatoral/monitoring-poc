@@ -1,0 +1,138 @@
+# E2E observability POC: "find the red dot"
+
+## Context
+A bank cannot locate where end-to-end transactions fail. Every transaction passes through
+OpenShift, which is the integration layer. Goal of this POC: prove we can see which hop
+fails, for a whole customer journey or a single service, using the service mesh.
+
+## Current environment (confirmed)
+- OpenShift with OpenShift Service Mesh installed; Envoy sidecars injected into all workloads.
+- Databases and some legacy applications run on VMs outside the cluster.
+- Service Mesh version, OpenShift version and installed operators: NOT YET CONFIRMED.
+  Check first with:
+  `oc version`
+  `oc get csv -A | grep -Ei "servicemesh|sail|kiali|tempo|opentelemetry|jaeger|cluster-observability"`
+  `oc get smcp,istio -A`
+
+## Agreed Phase 1 design
+1. Metrics: enable user workload monitoring; PodMonitor for sidecars, ServiceMonitor for istiod.
+2. Kiali connected to Thanos Querier (https://thanos-querier.openshift-monitoring.svc:9091).
+3. Tracing: Tempo Operator (TempoMonolithic for POC) + Red Hat build of OpenTelemetry collector.
+4. Mesh sends spans via meshConfig.extensionProviders (opentelemetry) + Telemetry API,
+   ~10% sampling; Envoy access logs enabled (response flags UF, UH, UT).
+5. Trace propagation: OpenTelemetry Operator auto-instrumentation (Instrumentation CR +
+   inject annotations). Java agent also gives JDBC spans for DB timing.
+6. External VMs and DBs registered as ServiceEntries (HTTP where possible, TCP for DBs).
+   HTTPS to legacy: app calls http, sidecar originates TLS via DestinationRule.
+   Keep outboundTrafficPolicy ALLOW_ANY; use PassthroughCluster in Kiali to discover
+   undeclared dependencies.
+7. Nothing is installed on the VMs or database servers in Phase 1.
+
+## Journey drill-down (design)
+- Ingress gateway VirtualService routes set a journey tag per API route
+  (e.g. /api/transfers -> fund-transfer).
+- Propagate it with OpenTelemetry baggage; add it as a metric label with Istio Telemetry
+  API tagOverrides and as a span attribute (TraceQL: { span.journey = "fund-transfer" }).
+- Keep the journey list short and fixed. Never put customer or account IDs in metric labels.
+- Journeys in the prototype: Fund transfer, Balance check, Card payment, Login.
+
+## Visualization
+- Kiali: engineers' troubleshooting view (traffic animation, red edges, node drill-down).
+- Grafana Canvas: curated per-journey NOC view bound to Prometheus queries.
+- Custom dashboard (this POC's UI): prototype/red-dot-animated.html currently uses
+  SIMULATED data. POC task is to replace the simulation with live data.
+
+## POC deliverables
+1. YAML manifests under manifests/ for steps 1-6 above, parameterized per namespace.
+2. A small backend (choose Node or Python) that queries Thanos (PromQL) and Tempo APIs
+   and returns per-hop and per-journey metrics: request rate, error rate, p95 latency,
+   plus recent failing traces.
+3. The prototype UI wired to that backend, keeping the current look, drill-down by
+   journey and by service, and the detection-signals panel (fed by Alertmanager alerts).
+4. A short runbook: how to verify a complete trace and how to read Envoy response flags.
+
+## Useful Istio metrics
+- istio_requests_total (labels: source_workload, destination_service_name, response_code,
+  response_flags)
+- istio_request_duration_milliseconds_bucket (p95 via histogram_quantile)
+- istio_tcp_connections_opened_total / closed_total, istio_tcp_sent_bytes_total (DB hops)
+
+## Rules
+- Bank environment: never commit tokens, kubeconfigs, hostnames or IPs. Read cluster
+  access from environment variables. Mask account numbers and personal data everywhere.
+- Validate manifests against the Red Hat docs for the installed Service Mesh version
+  (2.x uses ServiceMeshControlPlane; 3.x uses the Istio CR).
+- Start with one pilot journey (fund transfer) end to end before generalizing.
+
+## Files
+- prototype/red-dot-static.html: static diagram of a detected failure.
+- prototype/red-dot-animated.html: animated traffic, failure scenarios, journey and
+  service drill-down (simulated data).
+- docs/e2e_observability_design.pptx: Phase 1 design deck.
+
+## Local kind POC (upstream mirror of the OpenShift design)
+Status (2026-10-06): all 5 phases built and verified; user asked to run phases 2-5 back to
+back. Docs: README.md (setup, URLs, demo script), docs/openshift-mapping.md (every
+component -> OpenShift), docs/runbook.md (complete trace, Envoy flags).
+
+- Everything goes through `make` (`make help`). It uses project-local tools in .tools/bin,
+  kubeconfig .tools/kubeconfig and Helm config .tools/helm (gitignored). For a shell:
+  `eval "$(make -s env)"`. Generated secrets and the throwaway CA are in .tools/ too.
+- Versions are pinned in versions.mk and follow OSSM 3.4 (Istio 1.30.5, Kiali 2.27).
+  kind node image is k8s 1.36.4, because Istio 1.30 does not support 1.37. The Tempo
+  Operator has no Helm chart (release manifest); everything else is Helm.
+- Host ports (127.0.0.1 only; 8080 and 3000 are taken on this Mac): API 18080, Kiali 20001,
+  Grafana 13000, Prometheus 19090, Alertmanager 19093, Tempo 13200, dashboard 18088.
+- Phases = scripts: cluster.sh, mesh.sh, apps.sh, metrics.sh, tracing.sh, externals.sh,
+  dashboard.sh. Faults: scripts/fault.sh (make demo-core-slow|demo-db-down|demo-switch-down|reset).
+  `make hops` prints per-hop RED + flags from Prometheus.
+
+### Design decisions (verified)
+- Mesh: Istio CNI on (as on OpenShift); gateway via gateway injection in istio-ingress;
+  mTLS STRICT in bank; native sidecars (istio-proxy is an init container).
+- Topology = prototype: gateway -> auth/accounts/payments/cards; payments -> notify;
+  accounts -> bank-db (TCP); payments -> core-banking (HTTP, sidecar TLS origination);
+  cards -> card-switch (HTTP); notify -> sms-gateway (undeclared -> PassthroughCluster).
+- Journey tagging: each gateway route sets `baggage: journey=<j>,channel=%REQ(x-channel)%`
+  (overwrites client baggage). OTel auto-instrumentation forwards baggage, so downstream
+  sidecars see it. Telemetry API tagOverrides map it to `journey`/`channel` labels with a CEL
+  ternary over a FIXED list (values: the 4 journeys, other, none). Envoy spans get the raw
+  `baggage` custom tag; the collector's transform processor turns it into span.journey.
+- Sampling: Envoy 100% -> collector tail_sampling (errors, 5xx, Envoy flags via
+  ottl_condition, >1.5 s, plus 10% probabilistic). Measured about 9% kept when healthy.
+  decision_cache is REQUIRED: without it, late spans are re-sampled and traces lose hops.
+  Complete trace = fund-transfer 12 spans, balance 5, card 6, login 4.
+- Access logs: envoyOtelAls -> collector -> Loki OTLP (service_name = workload; attributes
+  response_flags, upstream_cluster, trace_id, journey). Stdout access log for >=400 only.
+- External systems: Docker containers on the kind network (apps/fault-mock: HTTP mock or TCP
+  proxy, admin API :9000), names via a CoreDNS `poc.internal` zone. ServiceEntries use
+  resolution DNS and exportTo ".". The core-banking CA is a ConfigMap referenced as
+  `credentialName: configmap://bank/core-banking-ca`: Istio 1.30 silently drops a
+  Secret credentialName on sidecars unless the DR has a workloadSelector, which means the
+  sidecar sends plaintext (that is what flag UC looked like).
+- DestinationRule gotcha: portLevelSettings REPLACE the top-level trafficPolicy (no merge).
+- Mock "down" must also drop pooled keep-alive connections, or Envoy keeps succeeding.
+- Alerts (PrometheusRule e2e-red-dot, istio-system): HopErrorRateHigh >5%, HopLatencyP95High
+  >1 s, HopTcpConnectFailures, JourneyErrorRateHigh >5%, JourneyLatencyP95High >2 s; for 1m.
+- Dashboard: apps/dashboard (stdlib Python backend + static/index.html derived from the
+  prototype; same look and drill-down). The topology is DISCOVERED, not hard-coded: hops
+  are reporter="source" Istio metrics over DISCOVERY_WINDOW (15m); node id = destination
+  service name / source workload mapped through rows where destination_workload is known
+  (canonical-service labels become "unknown" exactly when an external system fails).
+  Columns = channel | gateway | service by longest call depth | external. Journeys come from
+  the journey label; TCP hops are inferred. Names/owners come from annotations
+  observability.bank/{display-name,description,owner,hidden} on Service/ServiceEntry (RBAC:
+  ClusterRole red-dot-topology-reader). External mocks register in CoreDNS through the
+  container label com.bank-poc.dns=<name> (scripts/coredns-sync.sh).
+- `make demo-new-service` (manifests/examples/loans): loans-svc + credit-bureau SE + the
+  loan-application journey. Verified: discovered in about 41 s with no dashboard change; a
+  credit-bureau outage became the red dot in 31 s, routed to the annotated owner. Journeys
+  allowed: fund-transfer, balance-check, card-payment, login, loan-application. A new
+  journey must be added to the telemetry CEL, the collector regex and a gateway route. Red dot = the deepest bad edge (a bad edge whose
+  target has no bad outgoing edge). Signals = Kiali/metrics, Alertmanager (top 2 + count),
+  Tempo trace for the hop, Loki flag counts with the owner team. Scenario buttons POST
+  /api/faults, which calls the mocks' admin API.
+- Known limits: the TCP DB hop has no spans and no journey label (no headers); p95 from Istio's
+  coarse histogram buckets overstates timeouts (3 s shows as about 4.7 s).
+- Python apps must use python:3.14 (glibc), which matches the OTel operator's Python image.
+- Request bodies carry account/card numbers (never URLs); apps log masked values only.

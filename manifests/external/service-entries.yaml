@@ -1,0 +1,129 @@
+# Systems outside the cluster, registered in the mesh (CLAUDE.md Phase 1 design, step 6).
+# Hostnames are POC placeholders; on OpenShift use the real DNS names of the VMs.
+#
+# core-banking: the app calls plain http://core-banking.poc.internal (port 80); the
+#   sidecar originates TLS to the VM's HTTPS port (DestinationRule below), so the mesh
+#   still sees HTTP: response codes, flags and latency per call.
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: core-banking
+  annotations:                                  # shown by the red-dot dashboard
+    observability.bank/display-name: "Core banking"
+    observability.bank/description: "VM, HTTPS"
+    observability.bank/owner: "core banking team"
+spec:
+  exportTo: ["."]     # only the bank namespace uses (and holds secrets for) this system
+  hosts: [core-banking.poc.internal]
+  location: MESH_EXTERNAL
+  resolution: DNS
+  ports:
+    - { number: 80, name: http, protocol: HTTP, targetPort: 8443 }
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: core-banking
+spec:
+  exportTo: ["."]     # only the bank namespace uses (and holds secrets for) this system
+  host: core-banking.poc.internal
+  trafficPolicy:      # top level, not portLevelSettings: port-level settings REPLACE (not merge) this block
+    connectionPool:
+      tcp: { connectTimeout: 2s }
+    tls:
+      mode: SIMPLE                    # sidecar originates TLS and verifies the server certificate
+      sni: core-banking.poc.internal
+      # CA that signed the VM's certificate. A ConfigMap, not a Secret: Istio 1.30 ignores a
+      # Secret credentialName on sidecars unless the DR has a workloadSelector (and then the
+      # sidecar would send PLAINTEXT). A CA certificate is not secret, so a ConfigMap is fine.
+      credentialName: configmap://bank/core-banking-ca
+---
+# Calls to core banking give up after 3 s: a slow VM shows up as 504 + flag UT.
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: core-banking
+spec:
+  exportTo: ["."]     # only the bank namespace uses (and holds secrets for) this system
+  hosts: [core-banking.poc.internal]
+  http:
+    - timeout: 3s
+      route: [{ destination: { host: core-banking.poc.internal, port: { number: 80 } } }]
+---
+# card-switch: HTTP. (A real ISO 8583 switch speaks TCP; you would then only get
+# connection-level metrics, like the database below.)
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: card-switch
+  annotations:                                  # shown by the red-dot dashboard
+    observability.bank/display-name: "Card switch"
+    observability.bank/description: "VM, HTTP"
+    observability.bank/owner: "card switch team"
+spec:
+  exportTo: ["."]     # only the bank namespace uses (and holds secrets for) this system
+  hosts: [card-switch.poc.internal]
+  location: MESH_EXTERNAL
+  resolution: DNS
+  ports:
+    - { number: 80, name: http, protocol: HTTP, targetPort: 8080 }
+---
+# When the switch stops answering, Envoy ejects it (outlier detection): the first calls
+# fail with UF (connect failure), then with UH (no healthy upstream) until it is back.
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: card-switch
+spec:
+  exportTo: ["."]     # only the bank namespace uses (and holds secrets for) this system
+  host: card-switch.poc.internal
+  trafficPolicy:
+    connectionPool:
+      tcp: { connectTimeout: 2s }
+    outlierDetection:
+      consecutiveGatewayErrors: 3
+      interval: 5s
+      baseEjectionTime: 15s
+      maxEjectionPercent: 100
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: card-switch
+spec:
+  exportTo: ["."]     # only the bank namespace uses (and holds secrets for) this system
+  hosts: [card-switch.poc.internal]
+  http:
+    - timeout: 3s
+      route: [{ destination: { host: card-switch.poc.internal, port: { number: 80 } } }]
+---
+# bank-db: PostgreSQL standing in for Oracle (TCP 1521 on the real VM). TCP only, so the
+# mesh reports connections, bytes and connect failures (response_flags), not queries.
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: bank-db
+  annotations:                                  # shown by the red-dot dashboard
+    observability.bank/display-name: "Oracle DB"
+    observability.bank/description: "VM, TCP (POC: PostgreSQL)"
+    observability.bank/owner: "DBA team"
+spec:
+  exportTo: ["."]     # only the bank namespace uses (and holds secrets for) this system
+  hosts: [bank-db.poc.internal]
+  location: MESH_EXTERNAL
+  resolution: DNS
+  ports:
+    - { number: 5432, name: tcp-postgres, protocol: TCP }
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: bank-db
+spec:
+  exportTo: ["."]     # only the bank namespace uses (and holds secrets for) this system
+  host: bank-db.poc.internal
+  trafficPolicy:
+    connectionPool:
+      tcp: { connectTimeout: 2s }
+# sms-gateway.poc.internal is deliberately NOT registered: with ALLOW_ANY its traffic
+# shows up as PassthroughCluster in Kiali, i.e. an undeclared dependency to discover.

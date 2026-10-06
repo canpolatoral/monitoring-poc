@@ -1,0 +1,57 @@
+# Kiali CR (same CRD as the OSSM-bundled Kiali operator). Locally it reads the in-cluster
+# Prometheus; on OpenShift point it at Thanos Querier with a bearer token (see mapping doc).
+apiVersion: kiali.io/v1alpha1
+kind: Kiali
+metadata:
+  name: kiali
+  namespace: istio-system
+spec:
+  auth:
+    strategy: anonymous          # OpenShift: "openshift" (OAuth login)
+  deployment:
+    cluster_wide_access: true
+    view_only_mode: false
+    resources:
+      requests: { cpu: 20m, memory: 64Mi }
+  server:
+    web_root: /kiali
+  external_services:
+    prometheus:
+      url: http://kps-prometheus.monitoring.svc.cluster.local:9090
+    grafana:
+      enabled: true
+      internal_url: http://kps-grafana.monitoring.svc.cluster.local:80
+      external_url: http://localhost:13000
+    tracing:
+      enabled: true
+      provider: tempo
+      internal_url: http://tempo-tempo.tracing.svc.cluster.local:3200
+      use_grpc: false
+      external_url: http://localhost:13000
+      tempo_config:
+        datasource_uid: tempo
+        org_id: "1"
+        url_format: grafana
+  kiali_feature_flags:
+    ui_defaults:
+      graph:
+        traffic:
+          http: requests
+          tcp: sent
+      refresh_interval: 15s
+---
+# kind-only: reach Kiali on http://localhost:20001/kiali (on OpenShift the operator creates a Route).
+apiVersion: v1
+kind: Service
+metadata:
+  name: kiali-nodeport
+  namespace: istio-system
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: kiali
+  ports:
+    - name: http
+      port: 20001
+      targetPort: 20001
+      nodePort: 30001

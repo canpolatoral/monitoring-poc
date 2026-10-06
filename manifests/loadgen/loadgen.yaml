@@ -1,0 +1,28 @@
+# Synthetic customers. Not in the mesh on purpose: it plays the internet/ATM network
+# in front of the ingress gateway.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: loadgen
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen
+  namespace: loadgen
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: loadgen } }
+  template:
+    metadata:
+      labels: { app: loadgen }
+    spec:
+      containers:
+        - name: loadgen
+          image: loadgen:poc
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: RPS, value: "12" }
+          resources:
+            requests: { cpu: 20m, memory: 48Mi }
+            limits:   { cpu: 500m, memory: 128Mi }

@@ -1,0 +1,9 @@
+manager:
+  collectorImage:
+    # contrib distribution: has tail_sampling and transform processors
+    repository: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+admissionWebhooks:
+  certManager:
+    enabled: true

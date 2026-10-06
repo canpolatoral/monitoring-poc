@@ -1,0 +1,93 @@
+# kube-prometheus-stack for the local POC. On OpenShift this is replaced by the built-in
+# monitoring stack with user workload monitoring (see docs/openshift-mapping.md).
+fullnameOverride: kps
+
+# Pick up PodMonitors/ServiceMonitors/PrometheusRules from every namespace, without
+# requiring the Helm release label (OpenShift UWM behaves the same way).
+prometheus:
+  service:
+    type: NodePort
+    nodePort: 30090
+  prometheusSpec:
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    scrapeInterval: 15s
+    evaluationInterval: 15s
+    retention: 2d
+    resources:
+      requests: { cpu: 100m, memory: 512Mi }
+      limits:   { memory: 2Gi }
+
+alertmanager:
+  service:
+    type: NodePort
+    nodePort: 30093
+  alertmanagerSpec:
+    resources:
+      requests: { cpu: 10m, memory: 32Mi }
+
+grafana:
+  service:
+    type: NodePort
+    nodePort: 30000
+  admin:
+    existingSecret: grafana-admin       # created by scripts/metrics.sh with a random password
+    userKey: admin-user
+    passwordKey: admin-password
+  grafana.ini:
+    auth.anonymous:                     # local convenience: read-only without login
+      enabled: true
+      org_role: Viewer
+    feature_toggles:
+      enable: traceqlEditor
+  sidecar:
+    dashboards:
+      searchNamespace: ALL
+      folderAnnotation: grafana_folder
+      provider: { foldersFromFilesStructure: true }
+  additionalDataSources:
+    - name: Tempo
+      uid: tempo
+      type: tempo
+      access: proxy
+      url: http://tempo-tempo.tracing.svc.cluster.local:3200
+      jsonData:
+        tracesToLogsV2:
+          datasourceUid: loki
+          spanStartTimeShift: -5m
+          spanEndTimeShift: 5m
+          filterByTraceID: true
+          customQuery: true
+          query: '{service_name=~".+"} | trace_id="$${__trace.traceId}"'
+        serviceMap: { datasourceUid: prometheus }
+        nodeGraph: { enabled: true }
+        search: { hide: false }
+    - name: Loki
+      uid: loki
+      type: loki
+      access: proxy
+      url: http://loki.logging.svc.cluster.local:3100
+      jsonData:
+        derivedFields:
+          - name: TraceID
+            matcherType: label
+            matcherRegex: trace_id
+            datasourceUid: tempo
+            url: '$${__value.raw}'
+    - name: Alertmanager
+      uid: alertmanager
+      type: alertmanager
+      access: proxy
+      url: http://kps-alertmanager.monitoring.svc.cluster.local:9093
+      jsonData: { implementation: prometheus }
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+
+# Not available or not useful on kind / Docker Desktop.
+nodeExporter: { enabled: false }
+kubeEtcd: { enabled: false }
+kubeControllerManager: { enabled: false }
+kubeScheduler: { enabled: false }
+kubeProxy: { enabled: false }

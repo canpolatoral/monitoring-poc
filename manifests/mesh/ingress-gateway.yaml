@@ -1,0 +1,67 @@
+# Ingress gateway deployed with gateway injection (the OSSM 3 / Sail way: gateways are
+# not part of the Istio CR). On OpenShift the Service would be ClusterIP and exposed by a Route.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: istio-ingress
+  labels:
+    istio-injection: enabled
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: istio-ingressgateway
+  namespace: istio-ingress
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: istio-ingressgateway
+  namespace: istio-ingress
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { istio: ingressgateway }
+  template:
+    metadata:
+      annotations:
+        inject.istio.io/templates: gateway
+      labels:
+        istio: ingressgateway
+        app: istio-ingressgateway
+        sidecar.istio.io/inject: "true"
+    spec:
+      serviceAccountName: istio-ingressgateway
+      containers:
+        - name: istio-proxy
+          image: auto          # replaced by the injector
+          resources:
+            requests: { cpu: 50m, memory: 96Mi }
+            limits:   { cpu: "1", memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: istio-ingressgateway
+  namespace: istio-ingress
+  labels: { istio: ingressgateway }
+spec:
+  type: NodePort
+  selector: { istio: ingressgateway }
+  ports:
+    - name: http2
+      port: 80
+      targetPort: 8080
+      nodePort: 30080
+---
+# Gateway owned by the platform team; app teams attach VirtualServices to it.
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: bank-gateway
+  namespace: istio-ingress
+spec:
+  selector: { istio: ingressgateway }
+  servers:
+    - port: { number: 80, name: http, protocol: HTTP }   # Service port; Istio maps it to targetPort 8080
+      hosts: ["*"]

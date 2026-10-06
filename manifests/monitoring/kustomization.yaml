@@ -1,0 +1,8 @@
+# One sidecar PodMonitor per mesh namespace (add a line per namespace) plus the istiod ServiceMonitor.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - istiod-servicemonitor.yaml
+  - alert-rules.yaml
+  - ns/bank
+  - ns/istio-ingress

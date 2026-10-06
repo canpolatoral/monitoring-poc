@@ -1,0 +1,370 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Red Dot Live</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--bg:#F4F7FB;--surface:#FFFFFF;--surface2:#EBF0F6;--ink:#13233A;--muted:#566780;--line:#C7D2E0;--grid:#D9E1EB;
+--teal:#0C9A90;--tealsoft:#DCF3F1;--violet:#6652CF;--violetsoft:#ECE8FC;--amber:#B87500;--ambersoft:#FBF0D9;--red:#D61F38;--redsoft:#FCE2E6;--onink:#FFFFFF}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0D1626;--surface:#142137;--surface2:#1A2A44;--ink:#E6EDF6;--muted:#93A4BA;--line:#2B3D59;--grid:#1C2B45;
+--teal:#3ECFC2;--tealsoft:#103532;--violet:#A091FF;--violetsoft:#251F48;--amber:#F2B53A;--ambersoft:#3A2C0E;--red:#FF5167;--redsoft:#3D1520;--onink:#0D1626}}
+:root[data-theme="dark"]{--bg:#0D1626;--surface:#142137;--surface2:#1A2A44;--ink:#E6EDF6;--muted:#93A4BA;--line:#2B3D59;--grid:#1C2B45;
+--teal:#3ECFC2;--tealsoft:#103532;--violet:#A091FF;--violetsoft:#251F48;--amber:#F2B53A;--ambersoft:#3A2C0E;--red:#FF5167;--redsoft:#3D1520;--onink:#0D1626}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;line-height:1.55;font-feature-settings:"tnum" 1}
+.wrap{max-width:1320px;margin:0 auto;padding:32px 24px 48px}
+h1{font-size:clamp(26px,3.4vw,40px);line-height:1.15;margin:0 0 8px;font-weight:600;letter-spacing:-.01em}
+.lede{margin:0 0 24px;color:var(--muted);max-width:70ch;font-size:17px}
+.figure{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:12px;overflow-x:auto}
+.figure svg{display:block;width:100%;min-width:760px;height:auto}
+svg text{font-family:inherit}
+.zone{fill:var(--surface2);stroke:none}
+.zone-mesh{fill:var(--violetsoft);stroke:var(--violet);stroke-opacity:.35;stroke-dasharray:6 6}
+.zlabel{font-size:13px;font-weight:600;fill:var(--muted)}
+.node rect.body{fill:var(--surface);stroke:var(--line);stroke-width:1.2}
+.node.svc rect.body,.node.gw rect.body{stroke:var(--violet);stroke-opacity:.55}
+.ntitle{font-size:15px;font-weight:600;fill:var(--ink)}
+.nsub{font-size:12px;fill:var(--muted)}
+.badge rect{fill:var(--violetsoft);stroke:var(--violet);stroke-width:1}
+.badge text{font-size:10px;font-weight:600;fill:var(--violet)}
+.sdot{fill:var(--teal)}
+.node.warn .sdot{fill:var(--amber)}
+.node.bad .sdot{fill:var(--red)}
+.node.bad rect.body{stroke:var(--red);stroke-width:2.2;stroke-opacity:1}
+.node.warn rect.body{stroke:var(--amber);stroke-width:1.8;stroke-opacity:1}
+.edge{fill:none;stroke:var(--teal);stroke-width:2.6;stroke-opacity:.55;stroke-linecap:round;transition:stroke .4s,stroke-width .4s}
+.edge.warn{stroke:var(--amber);stroke-opacity:.9;stroke-width:3}
+.edge.bad,.edge.slow,.edge.error{stroke:var(--red);stroke-opacity:1;stroke-width:4}
+.halo{fill:none;stroke:var(--red);stroke-width:2;opacity:0}
+.halo.on{opacity:1}
+.pill rect{fill:var(--tealsoft);stroke:var(--teal);stroke-width:1}
+.pill text{font-size:12.5px;font-weight:600;fill:var(--ink)}
+.legend text{font-size:12.5px;fill:var(--muted)}
+.mark circle{fill:var(--ink)}
+.mark text{fill:var(--onink);font-size:13px;font-weight:700}
+.alarm-pill rect{fill:var(--red)}
+.alarm-pill text{fill:#fff;font-size:12.5px;font-weight:600}
+@media (prefers-reduced-motion:no-preference){
+ .halo.on{animation:pulse 1.6s ease-out infinite;transform-box:fill-box;transform-origin:center}
+ .halo.on.d2{animation-delay:.8s}
+ @keyframes pulse{0%{transform:scale(.85);opacity:.9}100%{transform:scale(1.35);opacity:0}}
+}
+:focus-visible{outline:3px solid var(--violet);outline-offset:2px}
+.controls{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 18px}
+.controls button{font:inherit;font-size:14.5px;font-weight:500;padding:9px 16px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer}
+.controls button[aria-pressed="true"]:not(.ghost){background:var(--ink);color:var(--onink);border-color:var(--ink)}
+.controls .ghost{margin-left:auto;color:var(--muted)}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px;align-items:start}
+@media (max-width:1050px){.layout{grid-template-columns:1fr}.controls .ghost{margin-left:0}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:20px}
+.panel h2{font-size:15px;font-weight:600;margin:20px 0 10px;color:var(--muted)}
+.status{display:flex;gap:10px;align-items:center;font-weight:600;padding:12px 14px;border-radius:12px;background:var(--tealsoft);transition:background .4s}
+.status .sd{flex:none;width:12px;height:12px;border-radius:50%;background:var(--teal)}
+.status.bad{background:var(--redsoft)}.status.bad .sd{background:var(--red)}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px}
+.kpis div{background:var(--surface2);border-radius:12px;padding:10px}
+.kpis .k{display:block;font-size:11.5px;color:var(--muted);line-height:1.3;min-height:30px}
+.kpis .v{display:block;font-size:20px;font-weight:600}
+.kpis .v.bad{color:var(--red)}
+.log{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.log li{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:14px;padding:10px 12px;border-radius:12px;background:var(--surface2)}
+.log li.empty{display:block;color:var(--muted)}
+.log .tag{grid-row:span 2;align-self:start;font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--redsoft);color:var(--red);white-space:nowrap}
+.log .tag.ok{background:var(--tealsoft);color:var(--teal)}
+.log time{font-size:11.5px;color:var(--muted)}
+@media (prefers-reduced-motion:no-preference){.log li.new{animation:in .45s ease-out}@keyframes in{from{opacity:0;transform:translateY(-6px)}}}
+.pk{fill:var(--teal)}.pk.warn{fill:var(--amber)}.pk.bad{fill:var(--red)}
+.burst{fill:none;stroke:var(--red);stroke-width:2}
+
+.focusbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;margin:0 0 16px}
+.journeys{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.flabel{font-size:14px;font-weight:600;color:var(--muted);margin-right:4px}
+.journeys button{font:inherit;font-size:14px;padding:7px 14px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer}
+.journeys button[aria-pressed="true"]{background:var(--violetsoft);border-color:var(--violet);color:var(--violet);font-weight:600}
+.hint{margin:0;color:var(--muted);font-size:14px}
+.crumb{display:flex;gap:8px;align-items:center;font-size:14px;margin:0 0 12px;color:var(--muted)}
+.crumb button{font:inherit;font-size:14px;background:none;border:0;padding:0;color:var(--violet);cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+#crumbCur{color:var(--ink);font-weight:600}
+.dmeta{margin:-4px 0 10px;font-size:13.5px;color:var(--muted)}
+.dmeta button{font:inherit;font-size:12.5px;border:1px solid var(--violet);color:var(--violet);background:var(--violetsoft);border-radius:999px;padding:1px 9px;margin:2px 2px 0 0;cursor:pointer}
+.hops{overflow-x:auto}
+.hops table{width:100%;border-collapse:collapse;font-size:13px}
+.hops th{text-align:left;font-weight:600;color:var(--muted);padding:4px 6px;border-bottom:1px solid var(--line)}
+.hops td{padding:6px;border-bottom:1px solid var(--line);white-space:nowrap}
+.hops td:first-child{white-space:normal}
+.hops tr.bad td{color:var(--red);font-weight:600}.hops tr.warn td:first-child{color:var(--amber)}
+.node{cursor:pointer}.node:focus{outline:none}.node:focus-visible rect.body{stroke:var(--violet);stroke-width:3}
+.node.sel rect.body{stroke:var(--violet);stroke-width:3;stroke-opacity:1}
+.node,.edge,.pk{transition:opacity .35s}
+.dim{opacity:.12}
+.edge.dim{opacity:.08}
+.pk.dim{opacity:0}
+.controls .live{margin-left:auto;display:inline-flex;align-items:center;gap:8px;font-size:14px;color:var(--muted);padding:9px 4px}
+.controls .live .ld{width:9px;height:9px;border-radius:50%;background:var(--teal)}
+.controls .live.stale .ld{background:var(--amber)}
+.controls .live.down .ld{background:var(--red)}
+@media (prefers-reduced-motion:no-preference){.controls .live:not(.down) .ld{animation:blink 2s ease-in-out infinite}@keyframes blink{50%{opacity:.35}}}
+@media (max-width:1050px){.controls .live{margin-left:0}}
+.controls button[disabled]{opacity:.6;cursor:progress}
+.note{margin:-8px 0 18px;color:var(--muted);font-size:13.5px}
+.log a,.traces a{color:var(--violet);text-underline-offset:3px}
+.log a.open{font-size:12.5px;white-space:nowrap}
+.log .tag.alert{background:var(--ambersoft);color:var(--amber)}
+.traces{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:13px}
+.traces li{display:grid;grid-template-columns:auto 1fr auto;gap:4px 10px;align-items:baseline;padding:8px 10px;border-radius:10px;background:var(--surface2)}
+.traces li.empty{display:block;color:var(--muted)}
+.traces time{color:var(--muted);font-size:11.5px}
+.traces .tj{font-weight:600}
+.traces .td{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:12px;color:var(--muted)}
+.pill a{cursor:pointer}.pill a:hover rect{stroke-width:2}
+.newb rect{fill:var(--teal)}.newb text{font-size:10px;font-weight:700;fill:var(--onink)}
+.flagchip{display:inline-block;font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:11px;font-weight:600;padding:0 6px;border-radius:6px;background:var(--redsoft);color:var(--red);margin-left:4px}
+</style></head><body><div class="wrap">
+<h1>Watch the mesh find the failing hop</h1>
+<p class="lede">Each dot is live traffic measured by the Envoy sidecars, and every service and dependency is discovered from mesh metrics, so new ones appear on their own. Break a real dependency below and watch the failing hop turn red, then drill into one customer journey or one service.</p>
+<div class="controls" role="group" aria-label="Inject a real fault">
+ <button data-sc="healthy" aria-pressed="false">All healthy</button>
+ <button data-sc="core" aria-pressed="false">Core banking slow</button>
+ <button data-sc="db" aria-pressed="false">Oracle DB unreachable</button>
+ <button data-sc="switch" aria-pressed="false">Card switch down</button>
+ <span class="live" id="live" role="status"><span class="ld"></span><span id="liveText">Connecting...</span></span>
+</div>
+<p class="note">The buttons change the external mock systems for real. Metrics react in about 30 seconds; alerts fire after about 1 to 2 minutes.</p>
+<div class="focusbar">
+ <div class="journeys" role="group" aria-label="Customer journey">
+  <span class="flabel">Journey</span>
+  <span id="journeyBtns" class="journeys"></span>
+ </div>
+ <p class="hint">Or click any service on the diagram to drill into it.</p>
+</div>
+<div class="layout">
+ <div class="figure"><svg id="topo" viewBox="0 0 1180 600" role="img" aria-labelledby="t1"></svg></div>
+ <aside class="panel" aria-live="polite">
+  <nav class="crumb" aria-label="Current view"><button id="back" hidden>All traffic</button><span id="crumbSep" hidden>/</span><span id="crumbCur">All traffic</span></nav>
+  <div class="status ok" id="status"><span class="sd"></span><span id="statusText">Waiting for data...</span></div>
+  <div class="kpis">
+   <div><span class="k">Requests per second</span><span class="v" id="k-rps">-</span></div>
+   <div><span class="k">Error rate</span><span class="v" id="k-err">-</span></div>
+   <div><span class="k">p95 latency</span><span class="v" id="k-p95">-</span></div>
+  </div>
+  <div id="detail" hidden><h2 id="detailTitle">Hops in this view</h2><p class="dmeta" id="detailMeta"></p>
+  <div class="hops"><table><thead><tr><th>Hop</th><th>Req/s</th><th>Errors</th><th>p95</th></tr></thead><tbody id="hops"></tbody></table></div></div>
+  <h2>Detection signals</h2>
+  <ol class="log" id="log"><li class="empty">Signals appear here when a hop degrades.</li></ol>
+  <h2>Recent failing traces</h2>
+  <ul class="traces" id="traces"><li class="empty">No failing traces in the last 15 minutes.</li></ul>
+ </aside>
+</div>
+</div>
+<script>const NS='http://www.w3.org/2000/svg';
+function el(tag,attrs,parent){const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(parent)parent.appendChild(e);return e}
+function tx(p,x,y,s,cls,anchor){const t=el('text',{x,y,class:cls,'text-anchor':anchor||'start'},p);t.textContent=s;return t}
+function clip(s,n){return s&&s.length>n?s.slice(0,n-1)+'…':s||''}
+const $=id=>document.getElementById(id);
+const fmt=n=>n.toLocaleString('en-US',{maximumFractionDigits:n<10?1:0});
+const fms=p=>p==null?'-':p>=1000?(p/1000).toFixed(1)+' s':Math.round(p)+' ms';
+const RM=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const svg=$('topo');
+
+// ------------------------------------------------------------------ layout
+// The topology is discovered by the backend from Istio metrics. Nodes are placed in columns:
+// customer channels | gateways | mesh services by call depth | systems outside the cluster.
+// Within a column, nodes keep the order in which they were first seen, so the picture stays
+// stable; new nodes are added at the end of their column.
+const W_={channel:170,gateway:155,service:170,external:190},NH=62,ROW=100,TOP=140;
+let order={};try{order=JSON.parse(localStorage.getItem('reddot-order')||'{}')}catch(e){}
+function colKey(n){return n.kind==='service'?'svc'+n.depth:n.kind}
+function layout(nodes,edges){
+ const D=Math.max(1,...Object.values(nodes).filter(n=>n.kind==='service').map(n=>n.depth));
+ const colX={channel:60,gateway:285,external:510+D*210+40};for(let d=1;d<=D;d++)colX['svc'+d]=510+(d-1)*210;
+ const keys=['channel','gateway'].concat([...Array(D)].map((_,i)=>'svc'+(i+1)),['external']);
+ const cols={};keys.forEach(k=>cols[k]=[]);Object.values(nodes).forEach(n=>(cols[colKey(n)]||[]).push(n.id));
+ const pos={},up={};Object.values(edges).forEach(e=>(up[e.to]=up[e.to]||[]).push(e.from));
+ const maxRows=Math.max(3,...keys.map(k=>cols[k].length));
+ keys.forEach(k=>{const known=(order[k]||[]).filter(id=>cols[k].includes(id));
+  const bary=id=>{const ys=(up[id]||[]).map(u=>pos[u]&&pos[u].y).filter(y=>y!=null);return ys.length?ys.reduce((a,b)=>a+b,0)/ys.length:1e9};
+  const fresh=cols[k].filter(id=>!known.includes(id)).sort((a,b)=>bary(a)-bary(b)||a.localeCompare(b));
+  order[k]=known.concat(fresh);
+  const y0=TOP+(maxRows-order[k].length)*ROW/2;
+  order[k].forEach((id,i)=>{const n=nodes[id];pos[id]={x:colX[k],y:y0+i*ROW,w:W_[n.kind],h:NH}})});
+ try{localStorage.setItem('reddot-order',JSON.stringify(order))}catch(e){}
+ const width=colX.external+W_.external+40,height=TOP+maxRows*ROW+90;
+ return {pos,D,width,height,colX}}
+function pathFor(a,b){const x1=a.x+a.w,y1=a.y+a.h/2,y2=b.y+b.h/2;
+ if(b.x>a.x+10){const x2=b.x,d=Math.max(26,(x2-x1)*.45);return `M${x1} ${y1} C${x1+d} ${y1}, ${x2-d} ${y2}, ${x2} ${y2}`}
+ const x2=b.x+b.w;return `M${x1} ${y1} C${x1+70} ${y1}, ${x2+70} ${y2}, ${x2} ${y2}`} // same column: loop on the right
+
+// --------------------------------------------------------------- drawing
+let T=null,topoSig='',L={};
+function buildTopology(S){
+ const lay=layout(S.nodes,S.edges);svg.innerHTML='';
+ svg.setAttribute('viewBox',`0 0 ${lay.width} ${lay.height}`);svg.style.minWidth=Math.round(lay.width*.64)+'px';
+ const title=el('title',{id:'t1'},svg);title.textContent='Live request traffic through the service mesh, discovered from Istio metrics, with failing hops in red';
+ const defs=el('defs',{},svg);
+ const pat=el('pattern',{id:'dots',width:22,height:22,patternUnits:'userSpaceOnUse'},defs);
+ el('circle',{cx:2,cy:2,r:1.1,fill:'var(--grid)'},pat);
+ const f=el('filter',{id:'glow',filterUnits:'userSpaceOnUse',x:0,y:0,width:lay.width,height:lay.height},defs);
+ el('feGaussianBlur',{stdDeviation:4,result:'b'},f);const m=el('feMerge',{},f);el('feMergeNode',{in:'b'},m);el('feMergeNode',{in:'SourceGraphic'},m);
+ el('rect',{x:0,y:0,width:lay.width,height:lay.height,fill:'url(#dots)'},svg);
+ const gZ=el('g',{},svg),gE=el('g',{},svg),gP=el('g',{},svg),gN=el('g',{},svg),gF=el('g',{},svg);
+ const zh=lay.height-88-30,meshW=lay.D*210-6,extX=lay.colX.external-20;
+ el('rect',{x:40,y:88,width:210,height:zh,rx:16,class:'zone'},gZ);tx(gZ,58,114,'Customer channels','zlabel');
+ el('rect',{x:488,y:88,width:meshW,height:zh,rx:16,class:'zone-mesh'},gZ);tx(gZ,506,114,'Service mesh (kind POC)','zlabel');
+ el('rect',{x:extX,y:88,width:230,height:zh,rx:16,class:'zone'},gZ);tx(gZ,extX+18,114,'Outside the cluster','zlabel');
+ const lg=el('g',{class:'legend'},gZ);
+ [['var(--teal)','Healthy traffic',0],['var(--amber)','Degraded',140],['var(--red)','Failing hop',255]].forEach(([c,l,dx])=>{
+  el('line',{x1:60+dx,y1:46,x2:90+dx,y2:46,stroke:c,'stroke-width':4,'stroke-linecap':'round'},lg);tx(lg,98+dx,50,l,'')});
+ const b0=el('g',{class:'badge'},lg);el('rect',{x:430,y:37,width:44,height:18,rx:9},b0);tx(b0,452,50,'envoy','','middle');tx(lg,482,50,'Sidecar, already injected. Topology discovered from mesh metrics','');
+ const paths={};
+ for(const id in S.edges){const e=S.edges[id];const a=lay.pos[e.from],b=lay.pos[e.to];if(!a||!b)continue;
+  paths[id]=el('path',{d:pathFor(a,b),class:'edge'+(e.tcp?' tcp':'')},gE)}
+ const nodes={};
+ for(const id in S.nodes){const n=S.nodes[id],p=lay.pos[id];if(!p)continue;
+  const k={channel:'ch',gateway:'gw',service:'svc',external:'ext'}[n.kind];
+  const g=el('g',{class:'node '+k},gN);
+  const halo=el('rect',{x:p.x-6,y:p.y-6,width:p.w+12,height:p.h+12,rx:14,class:'halo'},g);
+  const halo2=el('rect',{x:p.x-6,y:p.y-6,width:p.w+12,height:p.h+12,rx:14,class:'halo d2'},g);
+  el('rect',{x:p.x,y:p.y,width:p.w,height:p.h,rx:11,class:'body'},g);
+  el('circle',{cx:p.x+17,cy:p.y+23,r:5,class:'sdot'},g);
+  tx(g,p.x+30,p.y+28,clip(n.name,20),'ntitle');tx(g,p.x+30,p.y+47,clip(n.sub,26),'nsub');
+  const tt=el('title',{},g);tt.textContent=n.name+(n.sub?' — '+n.sub:'')+(n.owner?'\nOwner: '+n.owner:'');
+  if(k==='svc'||k==='gw'){const b=el('g',{class:'badge'},g);el('rect',{x:p.x+p.w-50,y:p.y-9,width:44,height:18,rx:9},b);tx(b,p.x+p.w-28,p.y+4,'envoy','','middle')}
+  if(n.isNew){const b=el('g',{class:'newb'},g);el('rect',{x:p.x+8,y:p.y-9,width:38,height:18,rx:9},b);tx(b,p.x+27,p.y+4,'new','','middle')}
+  g.setAttribute('tabindex','0');g.setAttribute('role','button');g.setAttribute('aria-label','Drill into '+n.name);
+  const go=()=>setFocus(focus.kind==='service'&&focus.id===id?{kind:'all'}:{kind:'service',id});
+  g.addEventListener('click',go);g.addEventListener('keydown',ev=>{if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();go()}});
+  nodes[id]={g,halos:[halo,halo2]}}
+ const py=lay.height-78;tx(gN,506,py-10,'Telemetry from every sidecar','zlabel');
+ const pills={};[['prometheus','Prometheus',506,118],['tempo','Tempo',636,100],['kiali','Kiali',748,128]].forEach(([id,l,x,w])=>{
+  const a=el('a',{href:LINKS[id]||'#',target:'_blank',rel:'noopener'},gN);
+  const g=el('g',{class:'pill'},a);el('rect',{x,y:py,width:w,height:38,rx:19},g);tx(g,x+w/2,py+24,l,'','middle');pills[id]={a}});
+ T={paths,nodes,pills,gP,gF};L={};for(const id in paths)L[id]=paths[id].getTotalLength();packets=[];bursts=[];acc={}}
+function setNode(id,state){const o=T.nodes[id];if(!o)return;o.g.classList.remove('warn','bad');if(state)o.g.classList.add(state);o.halos.forEach(h=>h.classList.toggle('on',state==='bad'))}
+function setEdge(id,state){const p=T.paths[id];if(!p)return;p.classList.remove('warn','bad','slow','error');p.removeAttribute('filter');if(state){p.classList.add(state);if(state!=='warn')p.setAttribute('filter','url(#glow)')}}
+
+// ------------------------------------------------------------- live state
+let S=null,LINKS={},lastOk=0,focus={kind:'all'},edgeMode={},seenSig=new Set(),hadDots=false;
+const nm=id=>S&&S.nodes[id]?S.nodes[id].name:id;
+const hopName=e=>nm(S.edges[e].from)+' to '+nm(S.edges[e].to);
+function edgesFor(){if(!S)return {};return focus.kind==='journey'&&S.journeys[focus.id]?S.journeys[focus.id].edgeStats:S.edges}
+function visualMode(id){const e=S.edges[id];if(!e||!e.state)return null;
+ if(S.redDots.includes(id))return e.p95&&e.p95>=1000&&e.err<50?'slow':'error';return 'warn'}
+function renderJourneyButtons(){const box=$('journeyBtns');const want=['all'].concat(Object.keys(S.journeys));
+ const have=[...box.querySelectorAll('button')].map(b=>b.dataset.j);
+ if(want.join()!==have.join()){box.innerHTML='';want.forEach(j=>{const b=document.createElement('button');b.dataset.j=j;
+  b.textContent=j==='all'?'All traffic':S.journeys[j].name;b.addEventListener('click',()=>setFocus(j==='all'?{kind:'all'}:{kind:'journey',id:j}));box.appendChild(b)})}
+ if(focus.kind==='journey'&&!S.journeys[focus.id])focus={kind:'all'};
+ if(focus.kind==='service'&&!S.nodes[focus.id])focus={kind:'all'}}
+function applyLive(){
+ const sig=Object.keys(S.nodes).sort().join()+'|'+Object.keys(S.edges).sort().join()+'|'+Object.values(S.nodes).map(n=>n.depth||0).join()+'|'+Object.values(S.nodes).map(n=>n.isNew?1:0).join();
+ if(sig!==topoSig){topoSig=sig;buildTopology(S)}
+ renderJourneyButtons();
+ edgeMode={};for(const id in T.paths){const m=visualMode(id);edgeMode[id]=m;setEdge(id,m)}
+ const nodeState={};S.redDots.forEach(id=>{const e=S.edges[id];nodeState[e.to]='bad';if(!nodeState[e.from])nodeState[e.from]='warn'});
+ for(const id in T.nodes)setNode(id,nodeState[id]||null);
+ document.querySelectorAll('[data-sc]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.sc===S.scenario));
+ for(const k in T.pills)if(LINKS[k])T.pills[k].a.setAttribute('href',LINKS[k]);
+ renderSignals();renderTraces();renderFocus();if(RM)staticDots()}
+async function poll(){
+ try{const r=await fetch('api/state',{cache:'no-store'});if(!r.ok)throw new Error(r.status);S=await r.json();lastOk=Date.now();if(S.links)LINKS=S.links;applyLive()}
+ catch(e){console.warn('state',e)}
+ liveIndicator()}
+function liveIndicator(){const age=(Date.now()-lastOk)/1000,l=$('live');
+ l.classList.toggle('stale',lastOk&&age>10&&age<=30);l.classList.toggle('down',!lastOk||age>30);
+ $('liveText').textContent=!lastOk||age>30?'Backend unreachable':'Live, updated '+Math.round(age)+' s ago'}
+
+// --------------------------------------------------------------- signals
+function renderSignals(){
+ const log=$('log'),sig=S.signals||[];
+ if(!sig.length){
+  if(hadDots){log.innerHTML='';add('Recovered','All hops back to normal error rate and latency.',true)}
+  else if(!log.querySelector('li:not(.empty)'))log.innerHTML='<li class="empty">Signals appear here when a hop degrades.</li>';
+  hadDots=false;return}
+ hadDots=true;log.innerHTML='';const ord={Kiali:0,Alert:1,Trace:2,'Access log':3};
+ [...sig].sort((a,b)=>ord[a.tag]-ord[b.tag]).forEach(s=>{const key=s.tag+s.text.replace(/[0-9.,]+/g,'');
+  add(s.tag,s.text,false,s.url,!seenSig.has(key),s.at,s.link);seenSig.add(key)})}
+function add(tag,text,ok,url,isNew,at,linkText){const log=$('log');const li=document.createElement('li');if(isNew!==false)li.className='new';
+ const t=at?new Date(at):new Date();li.innerHTML=`<span class="tag${ok?' ok':tag==='Alert'?' alert':''}"></span><time>${t.toLocaleTimeString('en-GB')}</time><span></span>`;
+ li.children[0].textContent=tag;li.children[2].textContent=text;
+ if(url){const a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener';a.className='open';a.textContent=(linkText||'Open')+' ↗';li.children[2].append(' ',a)}
+ log.appendChild(li)}
+function renderTraces(){const ul=$('traces');let ts=S.failingTraces||[];
+ if(focus.kind==='journey')ts=ts.filter(t=>t.journey===focus.id);
+ ts=ts.slice(0,6);ul.innerHTML='';
+ if(!ts.length){ul.innerHTML='<li class="empty">No failing traces in the last 15 minutes'+(focus.kind==='journey'?' for this journey':'')+'.</li>';return}
+ ts.forEach(t=>{const li=document.createElement('li');
+  const time=document.createElement('time');time.textContent=new Date(t.start*1000).toLocaleTimeString('en-GB');
+  const mid=document.createElement('span');const j=document.createElement('span');j.className='tj';j.textContent=(S.journeys[t.journey]||{}).name||t.journey||'unknown journey';
+  const a=document.createElement('a');a.href=t.url;a.target='_blank';a.rel='noopener';a.className='td';a.textContent=' '+t.traceID.slice(0,12)+'...';mid.append(j,a);
+  const d=document.createElement('span');d.className='td';d.textContent=fms(t.durationMs);li.append(time,mid,d);ul.appendChild(li)})}
+
+// ------------------------------------------------------------ animation
+let packets=[],bursts=[],acc={};
+function spawn(id){const st=edgesFor()[id]||S.edges[id];if(!st)return;const mode=edgeMode[id];let cls='',sp=170;
+ const fail=Math.random()<Math.min(1,(st.err||0)/100);
+ if(mode==='slow'||(st.p95&&st.p95>=1000))sp=55;
+ if(fail)cls=mode==='warn'?'warn':'bad';else if(mode==='warn'&&Math.random()<.25)cls='warn';
+ const c=el('circle',{r:cls==='bad'?5:4,class:'pk '+cls},T.gP);if(focus.kind!=='all'&&!focusEdges().includes(id))c.classList.add('dim');
+ packets.push({id,d:0,sp:sp*(0.85+Math.random()*.3),c,bad:fail&&cls==='bad'})}
+let last=performance.now();
+function frame(now){const dt=Math.min(.05,(now-last)/1000);last=now;
+ if(S&&T&&!document.hidden){for(const id in T.paths){const r=(S.edges[id]&&S.edges[id].rps)||0;if(!r)continue;
+  const w=Math.min(4,Math.max(.35,Math.sqrt(r)*.9)); // dots per second: grows with real traffic, capped for readability
+  acc[id]=(acc[id]||Math.random())+dt*w;while(acc[id]>1){acc[id]-=1;spawn(id)}}
+  packets=packets.filter(p=>{const path=T.paths[p.id];if(!path){p.c.remove();return false}p.d+=p.sp*dt;const len=L[p.id];
+   if(p.bad&&p.d>len*.8){const pt=path.getPointAtLength(p.d);const b=el('circle',{cx:pt.x,cy:pt.y,r:4,class:'burst'},T.gF);bursts.push({b,t:0});p.c.remove();return false}
+   if(p.d>=len){p.c.remove();return false}
+   const pt=path.getPointAtLength(p.d);p.c.setAttribute('cx',pt.x);p.c.setAttribute('cy',pt.y);return true});
+  bursts=bursts.filter(o=>{o.t+=dt;o.b.setAttribute('r',4+o.t*30);o.b.setAttribute('opacity',Math.max(0,1-o.t/.5));if(o.t>.5){o.b.remove();return false}return true})}
+ requestAnimationFrame(frame)}
+function staticDots(){T.gP.innerHTML='';for(const id in T.paths){if(!S.edges[id]||!S.edges[id].rps)continue;const mode=edgeMode[id];for(let f=.2;f<.95;f+=.25){const pt=T.paths[id].getPointAtLength(L[id]*f);el('circle',{cx:pt.x,cy:pt.y,r:3.8,'data-e':id,class:'pk '+(mode&&mode!=='warn'?'bad':mode==='warn'?'warn':'')},T.gP)}}}
+
+// ------------------------------------------------------------ drill-down
+function focusEdges(){if(!S||focus.kind==='all')return Object.keys(S?S.edges:{});
+ if(focus.kind==='journey'){const j=S.journeys[focus.id];return j?j.edges.filter(e=>!S.edges[e]||!S.edges[e].channel||(j.edgeStats[e]&&j.edgeStats[e].rps>0)):[]}
+ return Object.keys(S.edges).filter(e=>S.edges[e].from===focus.id||S.edges[e].to===focus.id)}
+function visible(){const es=focusEdges();const ns=new Set();es.forEach(e=>{if(S.edges[e]){ns.add(S.edges[e].from);ns.add(S.edges[e].to)}});return {es:new Set(es),ns}}
+function journeysOf(id){return Object.keys(S.journeys).filter(k=>S.journeys[k].edges.some(e=>S.edges[e]&&(S.edges[e].from===id||S.edges[e].to===id)))}
+function renderFocus(){if(!T)return;const v=visible(),all=focus.kind==='all';
+ for(const id in T.paths)T.paths[id].classList.toggle('dim',!all&&!v.es.has(id));
+ for(const id in T.nodes){T.nodes[id].g.classList.toggle('dim',!all&&!v.ns.has(id));T.nodes[id].g.classList.toggle('sel',focus.kind==='service'&&focus.id===id)}
+ packets.forEach(p=>p.c.classList.toggle('dim',!all&&!v.es.has(p.id)));
+ T.gP.querySelectorAll('circle').forEach(c=>{if(c.dataset.e)c.classList.toggle('dim',!all&&!v.es.has(c.dataset.e))});
+ document.querySelectorAll('[data-j]').forEach(b=>b.setAttribute('aria-pressed',(focus.kind==='journey'&&b.dataset.j===focus.id)||(all&&b.dataset.j==='all')));
+ const label=all?'All traffic':focus.kind==='journey'?S.journeys[focus.id].name:nm(focus.id);
+ $('crumbCur').textContent=label;$('back').hidden=all;$('crumbSep').hidden=all;$('detail').hidden=all;
+ if(!all){$('detailTitle').textContent=focus.kind==='journey'?'Hops in this journey':'Calls in and out of '+label;
+  const meta=$('detailMeta');meta.textContent='';
+  if(focus.kind==='service'){const n=S.nodes[focus.id];const js=journeysOf(focus.id);
+   if(n.owner)meta.append('Owner: '+n.owner+'. ');
+   meta.append(js.length?'Used by: ':'Not part of a tracked journey');js.forEach(k=>{const b=document.createElement('button');b.textContent=S.journeys[k].name;b.onclick=()=>setFocus({kind:'journey',id:k});meta.append(b)})}
+  else{const inf=S.journeys[focus.id].inferred||[];meta.textContent=inf.length?'Database hops have no journey label (TCP); they are added because this journey reaches their client.':''}}
+ tick()}
+function setFocus(f){focus=f;renderFocus();if(S)renderTraces()}
+function tick(){if(!S||!T)return;const M=edgesFor();const es=focusEdges().filter(e=>M[e]);
+ let rps,err,p95;
+ if(focus.kind==='all')({rps,err,p95}=S.totals);
+ else if(focus.kind==='journey')({rps,err,p95}=S.journeys[focus.id]);
+ else{const inb=es.filter(e=>S.edges[e].to===focus.id&&!S.edges[e].tcp),out=es.filter(e=>S.edges[e].from===focus.id);const src=inb.length?inb:out;
+  rps=src.reduce((s,e)=>s+M[e].rps,0);err=Math.max(0,...es.map(e=>M[e].err));const ps=src.map(e=>M[e].p95).filter(x=>x!=null);p95=ps.length?Math.max(...ps):null}
+ $('k-rps').textContent=fmt(rps);$('k-err').textContent=err.toFixed(1)+'%';$('k-err').classList.toggle('bad',err>5);$('k-p95').textContent=fms(p95);$('k-p95').classList.toggle('bad',p95>1000);
+ const dots=S.redDots.filter(d=>es.includes(d)),st=$('status');
+ if(focus.kind==='all'){st.className='status '+(S.redDots.length?'bad':'ok');$('statusText').textContent=S.redDots.length?'Red dot: '+S.redDots.map(hopName).join('; '):'All hops healthy'}
+ else{const lbl=focus.kind==='journey'?S.journeys[focus.id].name:nm(focus.id);st.className='status '+(dots.length?'bad':'ok');
+  $('statusText').textContent=dots.length?'Red dot in this view: '+hopName(dots[0]):lbl+' is healthy'}
+ if(!$('detail').hidden){const tb=$('hops');tb.innerHTML='';es.forEach(e=>{const s=M[e],tcp=S.edges[e].tcp;const tr=document.createElement('tr');tr.className=s.state?(S.redDots.includes(e)?'bad':'warn'):'';
+  const hop=document.createElement('td');hop.textContent=hopName(e);s.flags.forEach(f=>{const c=document.createElement('span');c.className='flagchip';c.title='Envoy response flag';c.textContent=f;hop.appendChild(c)});
+  tr.appendChild(hop);[tcp?fmt(s.rps)+' conn':fmt(s.rps),s.err.toFixed(1)+'%',tcp?'TCP':fms(s.p95)].forEach(t=>{const td=document.createElement('td');td.textContent=t;tr.appendChild(td)});tb.appendChild(tr)})}}
+
+$('back').addEventListener('click',()=>setFocus({kind:'all'}));
+// Scenario buttons inject real faults into the external mocks (through the backend). POC only.
+document.querySelectorAll('[data-sc]').forEach(b=>b.addEventListener('click',async()=>{
+ const btns=document.querySelectorAll('[data-sc]');btns.forEach(x=>x.disabled=true);
+ try{const r=await fetch('api/faults',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({scenario:b.dataset.sc})});
+  const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);
+  btns.forEach(x=>x.setAttribute('aria-pressed',x.dataset.sc===j.scenario));
+  add(b.dataset.sc==='healthy'?'Reset':'Injected',b.dataset.sc==='healthy'?'All faults cleared in the external systems.':b.textContent+': fault injected. Waiting for the mesh to notice...',b.dataset.sc==='healthy')}
+ catch(e){add('Error','Could not change the fault: '+e.message)}
+ finally{btns.forEach(x=>x.disabled=false)}}));
+setInterval(poll,3000);setInterval(liveIndicator,1000);setInterval(tick,3000);poll();
+if(!RM)requestAnimationFrame(frame);
+</script></body></html>

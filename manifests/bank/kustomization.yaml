@@ -1,0 +1,9 @@
+# Sample bank workload. Change `namespace` to deploy the same set into another namespace.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: bank
+resources:
+  - namespace.yaml
+  - workloads.yaml
+  - ingress-routes.yaml
+  - peer-authentication.yaml

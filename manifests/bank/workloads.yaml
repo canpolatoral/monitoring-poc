@@ -1,0 +1,275 @@
+# ---------------------------------------------------------------- auth-svc (Login and OTP)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: auth-svc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-svc
+  labels: { app: auth-svc }
+  annotations:                                  # shown by the red-dot dashboard
+    observability.bank/description: "Login and OTP"
+    observability.bank/owner: "identity team"
+spec:
+  selector: { app: auth-svc }
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      appProtocol: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-svc
+  labels: { app: auth-svc, version: v1 }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: auth-svc }
+  template:
+    metadata:
+      labels: { app: auth-svc, version: v1 }
+      annotations:
+        instrumentation.opentelemetry.io/inject-python: "true"   # OTel auto-instrumentation
+        instrumentation.opentelemetry.io/container-names: app
+        traffic.sidecar.istio.io/excludeOutboundPorts: "4318"    # keep span export out of the service graph
+    spec:
+      serviceAccountName: auth-svc
+      containers:
+        - name: app
+          image: bank-svc:poc
+          imagePullPolicy: IfNotPresent
+          ports: [{ name: http, containerPort: 8080 }]
+          env:
+            - { name: SERVICE_NAME, value: auth-svc }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+---
+# ---------------------------------------------------------------- accounts-svc (Balances)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: accounts-svc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: accounts-svc
+  labels: { app: accounts-svc }
+  annotations:                                  # shown by the red-dot dashboard
+    observability.bank/description: "Balances"
+    observability.bank/owner: "accounts team"
+spec:
+  selector: { app: accounts-svc }
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      appProtocol: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: accounts-svc
+  labels: { app: accounts-svc, version: v1 }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: accounts-svc }
+  template:
+    metadata:
+      labels: { app: accounts-svc, version: v1 }
+      annotations:
+        instrumentation.opentelemetry.io/inject-python: "true"   # OTel auto-instrumentation
+        instrumentation.opentelemetry.io/container-names: app
+        traffic.sidecar.istio.io/excludeOutboundPorts: "4318"    # keep span export out of the service graph
+    spec:
+      serviceAccountName: accounts-svc
+      containers:
+        - name: app
+          image: bank-svc:poc
+          imagePullPolicy: IfNotPresent
+          ports: [{ name: http, containerPort: 8080 }]
+          env:
+            - { name: SERVICE_NAME, value: accounts-svc }
+            - name: DB_DSN                # created by scripts/externals.sh (random password)
+              valueFrom: { secretKeyRef: { name: bank-db-credentials, key: dsn, optional: true } }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+---
+# ---------------------------------------------------------------- payments-svc (Fund transfers)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: payments-svc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payments-svc
+  labels: { app: payments-svc }
+  annotations:                                  # shown by the red-dot dashboard
+    observability.bank/description: "Fund transfers"
+    observability.bank/owner: "payments team"
+spec:
+  selector: { app: payments-svc }
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      appProtocol: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments-svc
+  labels: { app: payments-svc, version: v1 }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: payments-svc }
+  template:
+    metadata:
+      labels: { app: payments-svc, version: v1 }
+      annotations:
+        instrumentation.opentelemetry.io/inject-python: "true"   # OTel auto-instrumentation
+        instrumentation.opentelemetry.io/container-names: app
+        traffic.sidecar.istio.io/excludeOutboundPorts: "4318"    # keep span export out of the service graph
+    spec:
+      serviceAccountName: payments-svc
+      containers:
+        - name: app
+          image: bank-svc:poc
+          imagePullPolicy: IfNotPresent
+          ports: [{ name: http, containerPort: 8080 }]
+          env:
+            - { name: SERVICE_NAME, value: payments-svc }
+            - { name: CORE_BANKING_URL, value: "http://core-banking.poc.internal" }
+            - { name: NOTIFY_URL, value: http://notify-svc:8080 }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+---
+# ---------------------------------------------------------------- cards-svc (Card authorization)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cards-svc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cards-svc
+  labels: { app: cards-svc }
+  annotations:                                  # shown by the red-dot dashboard
+    observability.bank/description: "Card authorization"
+    observability.bank/owner: "cards team"
+spec:
+  selector: { app: cards-svc }
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      appProtocol: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cards-svc
+  labels: { app: cards-svc, version: v1 }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: cards-svc }
+  template:
+    metadata:
+      labels: { app: cards-svc, version: v1 }
+      annotations:
+        instrumentation.opentelemetry.io/inject-python: "true"   # OTel auto-instrumentation
+        instrumentation.opentelemetry.io/container-names: app
+        traffic.sidecar.istio.io/excludeOutboundPorts: "4318"    # keep span export out of the service graph
+    spec:
+      serviceAccountName: cards-svc
+      containers:
+        - name: app
+          image: bank-svc:poc
+          imagePullPolicy: IfNotPresent
+          ports: [{ name: http, containerPort: 8080 }]
+          env:
+            - { name: SERVICE_NAME, value: cards-svc }
+            - { name: CARD_SWITCH_URL, value: "http://card-switch.poc.internal" }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+---
+# ---------------------------------------------------------------- notify-svc (SMS and push)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: notify-svc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notify-svc
+  labels: { app: notify-svc }
+  annotations:                                  # shown by the red-dot dashboard
+    observability.bank/description: "SMS and push"
+    observability.bank/owner: "messaging team"
+spec:
+  selector: { app: notify-svc }
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      appProtocol: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notify-svc
+  labels: { app: notify-svc, version: v1 }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: notify-svc }
+  template:
+    metadata:
+      labels: { app: notify-svc, version: v1 }
+      annotations:
+        instrumentation.opentelemetry.io/inject-python: "true"   # OTel auto-instrumentation
+        instrumentation.opentelemetry.io/container-names: app
+        traffic.sidecar.istio.io/excludeOutboundPorts: "4318"    # keep span export out of the service graph
+    spec:
+      serviceAccountName: notify-svc
+      containers:
+        - name: app
+          image: bank-svc:poc
+          imagePullPolicy: IfNotPresent
+          ports: [{ name: http, containerPort: 8080 }]
+          env:
+            - { name: SERVICE_NAME, value: notify-svc }
+            - { name: SMS_GATEWAY_URL, value: "http://sms-gateway.poc.internal:8080" }   # undeclared on purpose
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+            limits:   { cpu: 500m, memory: 256Mi }

@@ -1,0 +1,297 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Finding the red dot: animated traffic</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--bg:#F4F7FB;--surface:#FFFFFF;--surface2:#EBF0F6;--ink:#13233A;--muted:#566780;--line:#C7D2E0;--grid:#D9E1EB;
+--teal:#0C9A90;--tealsoft:#DCF3F1;--violet:#6652CF;--violetsoft:#ECE8FC;--amber:#B87500;--ambersoft:#FBF0D9;--red:#D61F38;--redsoft:#FCE2E6;--onink:#FFFFFF}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0D1626;--surface:#142137;--surface2:#1A2A44;--ink:#E6EDF6;--muted:#93A4BA;--line:#2B3D59;--grid:#1C2B45;
+--teal:#3ECFC2;--tealsoft:#103532;--violet:#A091FF;--violetsoft:#251F48;--amber:#F2B53A;--ambersoft:#3A2C0E;--red:#FF5167;--redsoft:#3D1520;--onink:#0D1626}}
+:root[data-theme="dark"]{--bg:#0D1626;--surface:#142137;--surface2:#1A2A44;--ink:#E6EDF6;--muted:#93A4BA;--line:#2B3D59;--grid:#1C2B45;
+--teal:#3ECFC2;--tealsoft:#103532;--violet:#A091FF;--violetsoft:#251F48;--amber:#F2B53A;--ambersoft:#3A2C0E;--red:#FF5167;--redsoft:#3D1520;--onink:#0D1626}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;line-height:1.55;font-feature-settings:"tnum" 1}
+.wrap{max-width:1320px;margin:0 auto;padding:32px 24px 48px}
+h1{font-size:clamp(26px,3.4vw,40px);line-height:1.15;margin:0 0 8px;font-weight:600;letter-spacing:-.01em}
+.lede{margin:0 0 24px;color:var(--muted);max-width:70ch;font-size:17px}
+.figure{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:12px;overflow-x:auto}
+.figure svg{display:block;width:100%;min-width:760px;height:auto}
+svg text{font-family:inherit}
+.zone{fill:var(--surface2);stroke:none}
+.zone-mesh{fill:var(--violetsoft);stroke:var(--violet);stroke-opacity:.35;stroke-dasharray:6 6}
+.zlabel{font-size:13px;font-weight:600;fill:var(--muted)}
+.node rect.body{fill:var(--surface);stroke:var(--line);stroke-width:1.2}
+.node.svc rect.body,.node.gw rect.body{stroke:var(--violet);stroke-opacity:.55}
+.ntitle{font-size:15px;font-weight:600;fill:var(--ink)}
+.nsub{font-size:12px;fill:var(--muted)}
+.badge rect{fill:var(--violetsoft);stroke:var(--violet);stroke-width:1}
+.badge text{font-size:10px;font-weight:600;fill:var(--violet)}
+.sdot{fill:var(--teal)}
+.node.warn .sdot{fill:var(--amber)}
+.node.bad .sdot{fill:var(--red)}
+.node.bad rect.body{stroke:var(--red);stroke-width:2.2;stroke-opacity:1}
+.node.warn rect.body{stroke:var(--amber);stroke-width:1.8;stroke-opacity:1}
+.edge{fill:none;stroke:var(--teal);stroke-width:2.6;stroke-opacity:.55;stroke-linecap:round;transition:stroke .4s,stroke-width .4s}
+.edge.warn{stroke:var(--amber);stroke-opacity:.9;stroke-width:3}
+.edge.bad,.edge.slow,.edge.error{stroke:var(--red);stroke-opacity:1;stroke-width:4}
+.halo{fill:none;stroke:var(--red);stroke-width:2;opacity:0}
+.halo.on{opacity:1}
+.pill rect{fill:var(--tealsoft);stroke:var(--teal);stroke-width:1}
+.pill text{font-size:12.5px;font-weight:600;fill:var(--ink)}
+.legend text{font-size:12.5px;fill:var(--muted)}
+.mark circle{fill:var(--ink)}
+.mark text{fill:var(--onink);font-size:13px;font-weight:700}
+.alarm-pill rect{fill:var(--red)}
+.alarm-pill text{fill:#fff;font-size:12.5px;font-weight:600}
+@media (prefers-reduced-motion:no-preference){
+ .halo.on{animation:pulse 1.6s ease-out infinite;transform-box:fill-box;transform-origin:center}
+ .halo.on.d2{animation-delay:.8s}
+ @keyframes pulse{0%{transform:scale(.85);opacity:.9}100%{transform:scale(1.35);opacity:0}}
+}
+:focus-visible{outline:3px solid var(--violet);outline-offset:2px}
+.controls{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 18px}
+.controls button{font:inherit;font-size:14.5px;font-weight:500;padding:9px 16px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer}
+.controls button[aria-pressed="true"]:not(.ghost){background:var(--ink);color:var(--onink);border-color:var(--ink)}
+.controls .ghost{margin-left:auto;color:var(--muted)}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px;align-items:start}
+@media (max-width:1050px){.layout{grid-template-columns:1fr}.controls .ghost{margin-left:0}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:20px}
+.panel h2{font-size:15px;font-weight:600;margin:20px 0 10px;color:var(--muted)}
+.status{display:flex;gap:10px;align-items:center;font-weight:600;padding:12px 14px;border-radius:12px;background:var(--tealsoft);transition:background .4s}
+.status .sd{flex:none;width:12px;height:12px;border-radius:50%;background:var(--teal)}
+.status.bad{background:var(--redsoft)}.status.bad .sd{background:var(--red)}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px}
+.kpis div{background:var(--surface2);border-radius:12px;padding:10px}
+.kpis .k{display:block;font-size:11.5px;color:var(--muted);line-height:1.3;min-height:30px}
+.kpis .v{display:block;font-size:20px;font-weight:600}
+.kpis .v.bad{color:var(--red)}
+.log{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.log li{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:14px;padding:10px 12px;border-radius:12px;background:var(--surface2)}
+.log li.empty{display:block;color:var(--muted)}
+.log .tag{grid-row:span 2;align-self:start;font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--redsoft);color:var(--red);white-space:nowrap}
+.log .tag.ok{background:var(--tealsoft);color:var(--teal)}
+.log time{font-size:11.5px;color:var(--muted)}
+@media (prefers-reduced-motion:no-preference){.log li.new{animation:in .45s ease-out}@keyframes in{from{opacity:0;transform:translateY(-6px)}}}
+.pk{fill:var(--teal)}.pk.warn{fill:var(--amber)}.pk.bad{fill:var(--red)}
+.burst{fill:none;stroke:var(--red);stroke-width:2}
+
+.focusbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;margin:0 0 16px}
+.journeys{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.flabel{font-size:14px;font-weight:600;color:var(--muted);margin-right:4px}
+.journeys button{font:inherit;font-size:14px;padding:7px 14px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer}
+.journeys button[aria-pressed="true"]{background:var(--violetsoft);border-color:var(--violet);color:var(--violet);font-weight:600}
+.hint{margin:0;color:var(--muted);font-size:14px}
+.crumb{display:flex;gap:8px;align-items:center;font-size:14px;margin:0 0 12px;color:var(--muted)}
+.crumb button{font:inherit;font-size:14px;background:none;border:0;padding:0;color:var(--violet);cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+#crumbCur{color:var(--ink);font-weight:600}
+.dmeta{margin:-4px 0 10px;font-size:13.5px;color:var(--muted)}
+.dmeta button{font:inherit;font-size:12.5px;border:1px solid var(--violet);color:var(--violet);background:var(--violetsoft);border-radius:999px;padding:1px 9px;margin:2px 2px 0 0;cursor:pointer}
+.hops{overflow-x:auto}
+.hops table{width:100%;border-collapse:collapse;font-size:13px}
+.hops th{text-align:left;font-weight:600;color:var(--muted);padding:4px 6px;border-bottom:1px solid var(--line)}
+.hops td{padding:6px;border-bottom:1px solid var(--line);white-space:nowrap}
+.hops td:first-child{white-space:normal}
+.hops tr.bad td{color:var(--red);font-weight:600}.hops tr.warn td:first-child{color:var(--amber)}
+.node{cursor:pointer}.node:focus{outline:none}.node:focus-visible rect.body{stroke:var(--violet);stroke-width:3}
+.node.sel rect.body{stroke:var(--violet);stroke-width:3;stroke-opacity:1}
+.node,.edge,.pk{transition:opacity .35s}
+.dim{opacity:.12}
+.edge.dim{opacity:.08}
+.pk.dim{opacity:0}
+</style></head><body><div class="wrap">
+<h1>Watch the mesh find the failing hop</h1>
+<p class="lede">Each dot is a live request. Pick a failure to see it turn red, then drill into one customer journey or one service to see only its hops.</p>
+<div class="controls" role="group" aria-label="Failure scenario">
+ <button data-sc="healthy" aria-pressed="true">All healthy</button>
+ <button data-sc="core" aria-pressed="false">Core banking slow</button>
+ <button data-sc="db" aria-pressed="false">Oracle DB unreachable</button>
+ <button data-sc="switch" aria-pressed="false">Card switch down</button>
+ <button id="tour" class="ghost" aria-pressed="true">Pause tour</button>
+</div>
+<div class="focusbar">
+ <div class="journeys" role="group" aria-label="Customer journey">
+  <span class="flabel">Journey</span>
+  <button data-j="all" aria-pressed="true">All traffic</button>
+  <button data-j="transfer" aria-pressed="false">Fund transfer</button>
+  <button data-j="balance" aria-pressed="false">Balance check</button>
+  <button data-j="card" aria-pressed="false">Card payment</button>
+  <button data-j="login" aria-pressed="false">Login</button>
+ </div>
+ <p class="hint">Or click any service on the diagram to drill into it.</p>
+</div>
+<div class="layout">
+ <div class="figure"><svg id="topo" viewBox="0 0 1180 600" role="img" aria-labelledby="t1"><title id="t1">Animated request traffic through the service mesh, with failing hops shown in red</title></svg></div>
+ <aside class="panel" aria-live="polite">
+  <nav class="crumb" aria-label="Current view"><button id="back" hidden>All traffic</button><span id="crumbSep" hidden>/</span><span id="crumbCur">All traffic</span></nav>
+  <div class="status ok" id="status"><span class="sd"></span><span id="statusText">All hops healthy</span></div>
+  <div class="kpis">
+   <div><span class="k">Requests per second</span><span class="v" id="k-rps">1,240</span></div>
+   <div><span class="k">Error rate</span><span class="v" id="k-err">0.3%</span></div>
+   <div><span class="k">p95 latency</span><span class="v" id="k-p95">180 ms</span></div>
+  </div>
+  <div id="detail" hidden><h2 id="detailTitle">Hops in this view</h2><p class="dmeta" id="detailMeta"></p>
+  <div class="hops"><table><thead><tr><th>Hop</th><th>Req/s</th><th>Errors</th><th>p95</th></tr></thead><tbody id="hops"></tbody></table></div></div>
+  <h2>Detection signals</h2>
+  <ol class="log" id="log"><li class="empty">Signals appear here when a hop degrades.</li></ol>
+ </aside>
+</div>
+</div>
+<script>const NS='http://www.w3.org/2000/svg';
+function el(tag,attrs,parent){const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(parent)parent.appendChild(e);return e}
+function tx(p,x,y,s,cls,anchor){const t=el('text',{x,y,class:cls,'text-anchor':anchor||'start'},p);t.textContent=s;return t}
+const N={
+ mobile:{x:60,y:150,w:170,h:62,t:'Mobile app',s:'Customer channel',k:'ch'},
+ web:{x:60,y:262,w:170,h:62,t:'Internet banking',s:'Customer channel',k:'ch'},
+ atm:{x:60,y:374,w:170,h:62,t:'ATM and POS',s:'Customer channel',k:'ch'},
+ ingress:{x:285,y:262,w:155,h:62,t:'Ingress gateway',s:'Trace starts here',k:'gw'},
+ auth:{x:510,y:130,w:170,h:62,t:'auth-svc',s:'Login and OTP',k:'svc'},
+ accounts:{x:510,y:250,w:170,h:62,t:'accounts-svc',s:'Balances',k:'svc'},
+ payments:{x:510,y:370,w:170,h:62,t:'payments-svc',s:'Fund transfers',k:'svc'},
+ cards:{x:720,y:190,w:160,h:62,t:'cards-svc',s:'Card authorization',k:'svc'},
+ notify:{x:720,y:330,w:160,h:62,t:'notify-svc',s:'SMS and push',k:'svc'},
+ switch:{x:960,y:150,w:180,h:62,t:'Card switch',s:'VM, TCP',k:'ext'},
+ db:{x:960,y:280,w:180,h:62,t:'Oracle DB',s:'VM, TCP 1521',k:'ext'},
+ core:{x:960,y:410,w:180,h:62,t:'Core banking',s:'VM, HTTPS',k:'ext'}
+};
+function cub(x1,y1,x2,y2){const d=Math.max(26,(x2-x1)*.45);return `M${x1} ${y1} C${x1+d} ${y1}, ${x2-d} ${y2}, ${x2} ${y2}`}
+const E=[
+ ['c1',cub(230,181,285,279)],['c2',cub(230,293,285,293)],['c3',cub(230,405,285,307)],
+ ['i1',cub(440,271,510,161)],['i4','M440 283 C470 283, 470 221, 500 221 L720 221'],
+ ['i2',cub(440,295,510,281)],['i3',cub(440,309,510,401)],
+ ['e4',cub(680,388,720,365)],['e1',cub(680,281,960,311)],['e2',cub(680,412,960,441)],['e3',cub(880,221,960,181)]
+];
+function buildTopology(svg){
+ const defs=el('defs',{},svg);
+ const pat=el('pattern',{id:'dots',width:22,height:22,patternUnits:'userSpaceOnUse'},defs);
+ el('circle',{cx:2,cy:2,r:1.1,fill:'var(--grid)'},pat);
+ const f=el('filter',{id:'glow',filterUnits:'userSpaceOnUse',x:0,y:0,width:1180,height:600},defs);
+ el('feGaussianBlur',{stdDeviation:4,result:'b'},f);const m=el('feMerge',{},f);el('feMergeNode',{in:'b'},m);el('feMergeNode',{in:'SourceGraphic'},m);
+ el('rect',{x:0,y:0,width:1180,height:600,fill:'url(#dots)'},svg);
+ const gZ=el('g',{},svg),gE=el('g',{},svg),gP=el('g',{},svg),gN=el('g',{},svg),gF=el('g',{},svg);
+ el('rect',{x:40,y:88,width:210,height:476,rx:16,class:'zone'},gZ);tx(gZ,58,114,'Customer channels','zlabel');
+ el('rect',{x:488,y:88,width:414,height:476,rx:16,class:'zone-mesh'},gZ);tx(gZ,506,114,'OpenShift service mesh','zlabel');
+ el('rect',{x:940,y:88,width:220,height:476,rx:16,class:'zone'},gZ);tx(gZ,958,114,'Outside the cluster','zlabel');
+ const lg=el('g',{class:'legend'},gZ);
+ [['var(--teal)','Healthy traffic',0],['var(--amber)','Degraded',140],['var(--red)','Failing hop',255]].forEach(([c,l,dx])=>{
+  el('line',{x1:60+dx,y1:46,x2:90+dx,y2:46,stroke:c,'stroke-width':4,'stroke-linecap':'round'},lg);tx(lg,98+dx,50,l,'')});
+ const b0=el('g',{class:'badge'},lg);el('rect',{x:430,y:37,width:44,height:18,rx:9},b0);tx(b0,452,50,'envoy','', 'middle');tx(lg,482,50,'Sidecar, already injected','');
+ const paths={};
+ E.forEach(([id,d])=>{paths[id]=el('path',{d,class:'edge',id:'edge-'+id},gE)});
+ const nodes={};
+ for(const id in N){const n=N[id];const g=el('g',{class:'node '+n.k,id:'node-'+id},gN);
+  const halo=el('rect',{x:n.x-6,y:n.y-6,width:n.w+12,height:n.h+12,rx:14,class:'halo'},g);
+  const halo2=el('rect',{x:n.x-6,y:n.y-6,width:n.w+12,height:n.h+12,rx:14,class:'halo d2'},g);
+  el('rect',{x:n.x,y:n.y,width:n.w,height:n.h,rx:11,class:'body'},g);
+  el('circle',{cx:n.x+17,cy:n.y+23,r:5,class:'sdot'},g);
+  tx(g,n.x+30,n.y+28,n.t,'ntitle');tx(g,n.x+30,n.y+47,n.s,'nsub');
+  if(n.k==='svc'||n.k==='gw'){const b=el('g',{class:'badge'},g);el('rect',{x:n.x+n.w-50,y:n.y-9,width:44,height:18,rx:9},b);tx(b,n.x+n.w-28,n.y+4,'envoy','','middle')}
+  nodes[id]={g,halos:[halo,halo2],n}}
+ tx(gN,510,474,'Telemetry from every sidecar','zlabel');
+ const pills={};[['prom','Prometheus',510,118],['tempo','Tempo',640,100],['kiali','Kiali',752,128]].forEach(([id,l,x,w])=>{
+  const g=el('g',{class:'pill'},gN);el('rect',{x,y:504,width:w,height:38,rx:19},g);tx(g,x+w/2,528,l,'','middle');pills[id]={x,w,y:504}});
+ return {paths,nodes,pills,gP,gF};
+}
+function setNode(T,id,state){const o=T.nodes[id];o.g.classList.remove('warn','bad');if(state)o.g.classList.add(state);o.halos.forEach(h=>h.classList.toggle('on',state==='bad'))}
+function setEdge(T,id,state){const p=T.paths[id];p.classList.remove('warn','bad','slow','error');p.removeAttribute('filter');if(state){p.classList.add(state);if(state!=='warn')p.setAttribute('filter','url(#glow)')}}
+const svg=document.getElementById('topo');const T=buildTopology(svg);
+const RM=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const W={c1:3,c2:2.2,c3:1.4,i1:1.6,i2:2,i3:2.2,i4:1.5,e1:2,e2:2.2,e3:1.5,e4:1};
+const SC={
+ healthy:{edges:{},nodes:{},kpi:[1240,0.3,180],status:'All hops healthy',ev:[]},
+ core:{edges:{e2:'slow',i3:'warn',c1:'warn'},nodes:{core:'bad',payments:'warn'},kpi:[1180,18.2,4200],status:'Red dot: payments-svc to Core banking',
+  ev:[['Kiali','Edge payments-svc to Core banking turned red: 18% errors, p95 4.2 s'],['Alert','PaymentsErrorRateHigh fired: above 5% for 2 minutes'],['Trace','Tempo: 4.1 of 4.3 seconds spent waiting on Core banking'],['Access log','Envoy flag UT, upstream timeout. Routed to the core banking team.']]},
+ db:{edges:{e1:'error',i2:'warn',c2:'warn'},nodes:{db:'bad',accounts:'warn'},kpi:[1205,41,950],status:'Red dot: accounts-svc to Oracle DB',
+  ev:[['Kiali','Edge accounts-svc to Oracle DB turned red: TCP connections failing'],['Alert','AccountsErrorRateHigh fired: 41% of balance checks failing'],['Trace','Tempo: JDBC span fails after 30 ms with connection refused'],['Access log','Envoy flag UF, upstream connection failure. Routed to the DBA team.']]},
+ switch:{edges:{e3:'error',i4:'warn',c3:'warn'},nodes:{switch:'bad',cards:'warn'},kpi:[1230,12.4,3000],status:'Red dot: cards-svc to Card switch',
+  ev:[['Kiali','Edge cards-svc to Card switch turned red: 12% of authorizations failing'],['Alert','CardAuthFailures fired: above 5% for 2 minutes'],['Trace','Tempo: card authorization span ends with no response from the switch'],['Access log','Envoy flag UH, no healthy upstream. Routed to the card switch team.']]}
+};
+let cur='healthy',packets=[],bursts=[],acc={},timers=[];
+const $=id=>document.getElementById(id);
+const fmt=n=>n.toLocaleString('en-US');
+function apply(name){setTimeout(()=>typeof renderFocus==='function'&&renderFocus(),0);
+ cur=name;const s=SC[name];timers.forEach(clearTimeout);timers=[];
+ for(const id in T.paths)setEdge(T,id,s.edges[id]||null);
+ for(const id in T.nodes)setNode(T,id,s.nodes[id]||null);
+ document.querySelectorAll('[data-sc]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.sc===name));
+ const st=$('status');st.className='status '+(name==='healthy'?'ok':'bad');$('statusText').textContent=name==='healthy'?s.status:'Investigating...';
+ const log=$('log');
+ if(name==='healthy'){log.innerHTML='';add('Recovered','All hops back to normal error rate and latency.',true)}
+ else{log.innerHTML='';s.ev.forEach((e,i)=>timers.push(setTimeout(()=>{add(e[0],e[1]);if(i===s.ev.length-1&&focus.kind==='all')$('statusText').textContent=s.status},(RM?0:1200)+i*(RM?0:1500))))}
+}
+function add(tag,text,ok){const log=$('log');const li=document.createElement('li');li.className='new';
+ const t=new Date().toLocaleTimeString('en-GB');li.innerHTML=`<span class="tag${ok?' ok':''}"></span><time>${t}</time><span></span>`;
+ li.children[0].textContent=tag;li.children[2].textContent=text;log.appendChild(li)}
+function kpis(){const [r,e,p]=SC[cur].kpi;const j=x=>x*(1+(Math.random()-.5)*.06);
+ $('k-rps').textContent=fmt(Math.round(j(r)));const ev=j(e);$('k-err').textContent=(ev<1?ev.toFixed(1):ev.toFixed(1))+'%';$('k-err').classList.toggle('bad',e>5);
+ const pv=j(p);$('k-p95').textContent=pv>=1000?(pv/1000).toFixed(1)+' s':Math.round(pv)+' ms';$('k-p95').classList.toggle('bad',p>800)}
+
+const L={};for(const id in T.paths)L[id]=T.paths[id].getTotalLength();
+function spawn(id){const mode=SC[cur].edges[id];let cls='',sp=170;
+ if(mode==='slow'){cls='bad';sp=55}else if(mode==='error'){cls=Math.random()<.65?'bad':''}else if(mode==='warn'){cls=Math.random()<.4?'warn':''}
+ const c=el('circle',{r:cls==='bad'?5:4,class:'pk '+cls},T.gP);if(typeof focus!=='undefined'&&focus.kind!=='all'&&!focusEdges().includes(id))c.classList.add('dim');packets.push({id,d:0,sp:sp*(0.85+Math.random()*.3),c,bad:cls==='bad'&&mode==='error'})}
+let last=performance.now();
+function frame(now){const dt=Math.min(.05,(now-last)/1000);last=now;
+ for(const id in W){acc[id]=(acc[id]||Math.random())+dt*W[id]*2.0;while(acc[id]>1){acc[id]-=1;spawn(id)}}
+ packets=packets.filter(p=>{p.d+=p.sp*dt;const len=L[p.id];
+  if(p.bad&&p.d>len*.8){const pt=T.paths[p.id].getPointAtLength(p.d);const b=el('circle',{cx:pt.x,cy:pt.y,r:4,class:'burst'},T.gF);bursts.push({b,t:0});p.c.remove();return false}
+  if(p.d>=len){p.c.remove();return false}
+  const pt=T.paths[p.id].getPointAtLength(p.d);p.c.setAttribute('cx',pt.x);p.c.setAttribute('cy',pt.y);return true});
+ bursts=bursts.filter(o=>{o.t+=dt;o.b.setAttribute('r',4+o.t*30);o.b.setAttribute('opacity',Math.max(0,1-o.t/.5));if(o.t>.5){o.b.remove();return false}return true});
+ requestAnimationFrame(frame)}
+function staticDots(){T.gP.innerHTML='';for(const id in T.paths){const mode=SC[cur].edges[id];for(let f=.2;f<.95;f+=.25){const pt=T.paths[id].getPointAtLength(L[id]*f);el('circle',{cx:pt.x,cy:pt.y,r:3.8,'data-e':id,class:'pk '+(mode&&mode!=='warn'?'bad':mode==='warn'?'warn':'')},T.gP)}}}
+
+const EP={c1:['mobile','ingress'],c2:['web','ingress'],c3:['atm','ingress'],i1:['ingress','auth'],i2:['ingress','accounts'],i3:['ingress','payments'],i4:['ingress','cards'],e1:['accounts','db'],e2:['payments','core'],e3:['cards','switch'],e4:['payments','notify']};
+const J={transfer:{name:'Fund transfer',edges:['c1','i3','e2','e4'],path:['c1','i3','e2']},
+ balance:{name:'Balance check',edges:['c1','c2','i2','e1'],path:['c2','i2','e1']},
+ card:{name:'Card payment',edges:['c3','i4','e3'],path:['c3','i4','e3']},
+ login:{name:'Login',edges:['c1','c2','i1'],path:['c1','i1']}};
+const BASE={c1:[330,0.2,60],c2:[240,0.2,55],c3:[150,0.3,70],i1:[170,0.2,90],i2:[220,0.1,70],i3:[240,0.3,140],i4:[150,0.2,80],e1:[220,0.1,25],e2:[240,0.2,210],e3:[150,0.2,180],e4:[110,0.4,40]};
+let focus={kind:'all'};
+function em(id){let [r,e,p]=BASE[id];const m=SC[cur].edges[id];const k=SC[cur].kpi;
+ if(m==='slow'){e=k[1];p=k[2]}else if(m==='error'){e=k[1];p=Math.max(p,k[2]*.3)}else if(m==='warn'){e=+(k[1]*.8).toFixed(1);p=Math.round(k[2]*1.02)}
+ const j=x=>x*(1+(Math.random()-.5)*.08);return [Math.round(j(r)),j(e),j(p),m]}
+const nm=id=>N[id].t;const fms=p=>p>=1000?(p/1000).toFixed(1)+' s':Math.round(p)+' ms';
+function focusEdges(){if(focus.kind==='all')return Object.keys(EP);if(focus.kind==='journey')return J[focus.id].edges;return Object.keys(EP).filter(e=>EP[e].includes(focus.id))}
+function visible(){const es=focusEdges();const ns=new Set();es.forEach(e=>EP[e].forEach(n=>ns.add(n)));return {es:new Set(es),ns}}
+function journeysOf(id){return Object.keys(J).filter(k=>J[k].edges.some(e=>EP[e].includes(id)))}
+function renderFocus(){const v=visible(),all=focus.kind==='all';
+ for(const id in T.paths)T.paths[id].classList.toggle('dim',!all&&!v.es.has(id));
+ for(const id in T.nodes){T.nodes[id].g.classList.toggle('dim',!all&&!v.ns.has(id));T.nodes[id].g.classList.toggle('sel',focus.kind==='service'&&focus.id===id)}
+ packets.forEach(p=>p.c.classList.toggle('dim',!all&&!v.es.has(p.id)));
+ T.gP.querySelectorAll('circle').forEach(c=>{if(c.dataset.e)c.classList.toggle('dim',!all&&!v.es.has(c.dataset.e))});
+ document.querySelectorAll('[data-j]').forEach(b=>b.setAttribute('aria-pressed',(focus.kind==='journey'&&b.dataset.j===focus.id)||(all&&b.dataset.j==='all')));
+ const label=all?'All traffic':focus.kind==='journey'?J[focus.id].name:nm(focus.id);
+ $('crumbCur').textContent=label;$('back').hidden=all;$('crumbSep').hidden=all;
+ $('detail').hidden=all;
+ if(all){const st=$('status');st.className='status '+(cur==='healthy'?'ok':'bad');$('statusText').textContent=SC[cur].status}
+ if(!all){$('detailTitle').textContent=focus.kind==='journey'?'Hops in this journey':'Calls in and out of '+label;
+  const meta=$('detailMeta');meta.textContent='';
+  if(focus.kind==='service'){const js=journeysOf(focus.id);meta.append(js.length?'Used by: ':'Not part of a tracked journey');js.forEach(k=>{const b=document.createElement('button');b.textContent=J[k].name;b.onclick=()=>setFocus({kind:'journey',id:k});meta.append(b)})}
+  else meta.textContent='Path: '+J[focus.id].path.map(e=>nm(EP[e][0])).concat(nm(EP[J[focus.id].path.slice(-1)[0]][1])).join(' to ')}
+ tick()}
+function setFocus(f){focus=f;renderFocus()}
+function tick(){const es=focusEdges();const M={};es.forEach(e=>M[e]=em(e));
+ let rps,err,p95;
+ if(focus.kind==='all'){const k=SC[cur].kpi,j=x=>x*(1+(Math.random()-.5)*.06);rps=j(k[0]);err=j(k[1]);p95=j(k[2])}
+ else if(focus.kind==='journey'){const jj=J[focus.id];rps=M[jj.path[0]][0];err=Math.max(...es.map(e=>M[e][1]));p95=M[jj.path[0]][2]}
+ else{const inb=es.filter(e=>EP[e][1]===focus.id),out=es.filter(e=>EP[e][0]===focus.id);const src=inb.length?inb:out;rps=src.reduce((s,e)=>s+M[e][0],0);err=Math.max(...es.map(e=>M[e][1]));p95=Math.max(...src.map(e=>M[e][2]))}
+ $('k-rps').textContent=fmt(Math.round(rps));$('k-err').textContent=err.toFixed(1)+'%';$('k-err').classList.toggle('bad',err>5);$('k-p95').textContent=fms(p95);$('k-p95').classList.toggle('bad',p95>800);
+ const bad=es.find(e=>M[e][3]&&M[e][3]!=='warn');const st=$('status');
+ if(focus.kind!=='all'){const lbl=focus.kind==='journey'?J[focus.id].name:nm(focus.id);
+  st.className='status '+(bad?'bad':'ok');$('statusText').textContent=bad?'Red dot in this view: '+nm(EP[bad][0])+' to '+nm(EP[bad][1]):lbl+' is healthy'}
+ if(!$('detail').hidden){const tb=$('hops');tb.innerHTML='';es.forEach(e=>{const [r,er,p,m]=M[e];const tr=document.createElement('tr');tr.className=m?(m==='warn'?'warn':'bad'):'';
+  [nm(EP[e][0])+' to '+nm(EP[e][1]),fmt(r),er.toFixed(1)+'%',fms(p)].forEach(t=>{const td=document.createElement('td');td.textContent=t;tr.appendChild(td)});tb.appendChild(tr)})}}
+for(const id in T.nodes){const g=T.nodes[id].g;g.setAttribute('tabindex','0');g.setAttribute('role','button');g.setAttribute('aria-label','Drill into '+N[id].t);
+ const go=()=>setFocus(focus.kind==='service'&&focus.id===id?{kind:'all'}:{kind:'service',id});
+ g.addEventListener('click',go);g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}})}
+document.querySelectorAll('[data-j]').forEach(b=>b.addEventListener('click',()=>setFocus(b.dataset.j==='all'?{kind:'all'}:{kind:'journey',id:b.dataset.j})));
+$('back').addEventListener('click',()=>setFocus({kind:'all'}));
+const TOUR=[['healthy',5000],['core',11000],['healthy',5000],['db',11000],['healthy',5000],['switch',11000]];
+let ti=0,tourOn=!RM,tt=null;
+function step(){const [n,ms]=TOUR[ti%TOUR.length];ti++;apply(n);if(RM)staticDots();tt=setTimeout(step,ms)}
+function setTour(on){tourOn=on;const b=$('tour');b.setAttribute('aria-pressed',on);b.textContent=on?'Pause tour':'Play tour';clearTimeout(tt);if(on)step()}
+document.querySelectorAll('[data-sc]').forEach(b=>b.addEventListener('click',()=>{setTour(false);apply(b.dataset.sc);if(RM)staticDots()}));
+$('tour').addEventListener('click',()=>setTour(!tourOn));
+apply('healthy');setInterval(tick,1000);renderFocus();
+if(RM){staticDots();$('tour').textContent='Play tour';$('tour').setAttribute('aria-pressed','false')}else{requestAnimationFrame(frame);setTour(true)}
+</script></body></html>

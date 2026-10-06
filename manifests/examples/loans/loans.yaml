@@ -1,0 +1,98 @@
+# Add-on: a NEW service + NEW external dependency + NEW journey, deployed after the fact.
+# Nothing in the dashboard is changed for this: it discovers loans-svc and credit-bureau
+# from mesh metrics and reads their names/owners from the annotations below.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: loans-svc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loans-svc
+  labels: { app: loans-svc }
+  annotations:
+    observability.bank/description: "Loan applications"
+    observability.bank/owner: "lending team"
+spec:
+  selector: { app: loans-svc }
+  ports:
+    - { name: http, port: 8080, targetPort: http, appProtocol: http }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loans-svc
+  labels: { app: loans-svc, version: v1 }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: loans-svc } }
+  template:
+    metadata:
+      labels: { app: loans-svc, version: v1 }
+      annotations:
+        instrumentation.opentelemetry.io/inject-python: "true"
+        instrumentation.opentelemetry.io/container-names: app
+        traffic.sidecar.istio.io/excludeOutboundPorts: "4318"
+    spec:
+      serviceAccountName: loans-svc
+      containers:
+        - name: app
+          image: bank-svc:poc
+          imagePullPolicy: IfNotPresent
+          ports: [{ name: http, containerPort: 8080 }]
+          env:
+            - { name: SERVICE_NAME, value: loans-svc }
+            - { name: CREDIT_BUREAU_URL, value: "http://credit-bureau.poc.internal" }
+            - { name: CORE_BANKING_URL, value: "http://core-banking.poc.internal" }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+---
+# New journey route on the shared gateway (merged with bank-api by Istio).
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: loans-api
+spec:
+  hosts: ["*"]
+  gateways: ["istio-ingress/bank-gateway"]
+  http:
+    - name: loan-application
+      headers:
+        request:
+          set: { baggage: "journey=loan-application,channel=%REQ(x-channel)%" }
+      match: [{ uri: { exact: /api/loans } }]
+      rewrite: { uri: /apply }
+      route: [{ destination: { host: loans-svc, port: { number: 8080 } } }]
+---
+# New external system: credit bureau (HTTP mock container on the kind network).
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: credit-bureau
+  annotations:
+    observability.bank/display-name: "Credit bureau"
+    observability.bank/description: "Partner API, HTTP"
+    observability.bank/owner: "credit bureau partner desk"
+spec:
+  exportTo: ["."]
+  hosts: [credit-bureau.poc.internal]
+  location: MESH_EXTERNAL
+  resolution: DNS
+  ports:
+    - { number: 80, name: http, protocol: HTTP, targetPort: 8080 }
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: credit-bureau
+spec:
+  exportTo: ["."]
+  hosts: [credit-bureau.poc.internal]
+  http:
+    - timeout: 3s
+      route: [{ destination: { host: credit-bureau.poc.internal, port: { number: 80 } } }]

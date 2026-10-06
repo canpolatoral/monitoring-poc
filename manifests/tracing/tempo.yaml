@@ -1,0 +1,41 @@
+# Tempo in monolithic mode (CLAUDE.md: "TempoMonolithic for POC"). Same CRD as the
+# Red Hat build of the Tempo Operator. Services: tempo-tempo:3200 (HTTP API, TraceQL),
+# tempo-tempo:4317/4318 (OTLP).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tracing
+---
+apiVersion: tempo.grafana.com/v1alpha1
+kind: TempoMonolithic
+metadata:
+  name: tempo
+  namespace: tracing
+spec:
+  storage:
+    traces:
+      backend: pv          # OpenShift: s3 (ODF/MinIO) for anything beyond a POC
+      size: 5Gi
+  ingestion:
+    otlp:
+      grpc: { enabled: true }
+      http: { enabled: true }
+  jaegerui:
+    enabled: false         # deprecated upstream; query traces in Grafana/Kiali instead
+  resources:
+    limits: { memory: 1Gi }
+    requests: { cpu: 50m, memory: 256Mi }
+---
+# kind-only: Tempo HTTP API on http://localhost:13200 (e.g. /api/search, TraceQL).
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo-nodeport
+  namespace: tracing
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/instance: tempo
+    app.kubernetes.io/component: tempo
+  ports:
+    - { name: http, port: 3200, targetPort: 3200, nodePort: 30200 }

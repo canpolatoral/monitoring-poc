@@ -1,0 +1,66 @@
+# "Find the red dot" alerts: error rate > 5% and p95 latency, per hop and per journey.
+# Hop = one client->server edge as seen by the client-side Envoy (reporter="source"),
+# which also covers calls to external systems (ServiceEntries), where only the client
+# has a sidecar. Journey = what the ingress gateway sees per journey label.
+# `for: 1m` keeps the demo snappy; production would use 2-5m.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: e2e-red-dot
+  namespace: istio-system
+spec:
+  groups:
+    - name: e2e-hops
+      rules:
+        - alert: HopErrorRateHigh
+          expr: |
+            sum by (source_workload, destination_service_name) (rate(istio_requests_total{reporter="source", response_code=~"5.."}[1m]))
+              /
+            sum by (source_workload, destination_service_name) (rate(istio_requests_total{reporter="source"}[1m]))
+              > 0.05
+          for: 1m
+          labels: { severity: critical, scope: hop }
+          annotations:
+            summary: "{{ $labels.source_workload }} -> {{ $labels.destination_service_name }}: {{ $value | humanizePercentage }} errors"
+            description: "More than 5% of calls on this hop fail. Check Envoy response flags in the access log (UF/UH/UT) to see whether the upstream is down, ejected or timing out."
+        - alert: HopLatencyP95High
+          expr: |
+            histogram_quantile(0.95, sum by (le, source_workload, destination_service_name) (rate(istio_request_duration_milliseconds_bucket{reporter="source"}[1m])))
+              > 1000
+          for: 1m
+          labels: { severity: warning, scope: hop }
+          annotations:
+            summary: "{{ $labels.source_workload }} -> {{ $labels.destination_service_name }}: p95 {{ $value | humanize }} ms"
+            description: "p95 latency on this hop is above 1 s."
+        - alert: HopTcpConnectFailures
+          expr: |
+            sum by (source_workload, destination_service_name) (rate(istio_tcp_connections_opened_total{reporter="source", response_flags!="-"}[1m])) > 0
+              or
+            sum by (source_workload, destination_service_name) (rate(istio_tcp_connections_closed_total{reporter="source", response_flags!="-"}[1m])) > 0
+          for: 1m
+          labels: { severity: critical, scope: hop }
+          annotations:
+            summary: "{{ $labels.source_workload }} -> {{ $labels.destination_service_name }}: TCP connections failing"
+            description: "TCP connections on this hop end with an Envoy failure flag (e.g. UF = connect failure). Typical for a database that is down or unreachable."
+    - name: e2e-journeys
+      rules:
+        - alert: JourneyErrorRateHigh
+          expr: |
+            sum by (journey) (rate(istio_requests_total{reporter="source", source_workload="istio-ingressgateway", journey!~"none|other", response_code=~"5.."}[1m]))
+              /
+            sum by (journey) (rate(istio_requests_total{reporter="source", source_workload="istio-ingressgateway", journey!~"none|other"}[1m]))
+              > 0.05
+          for: 1m
+          labels: { severity: critical, scope: journey }
+          annotations:
+            summary: "Journey {{ $labels.journey }}: {{ $value | humanizePercentage }} of requests failing"
+            description: "Customers see errors on this journey. Look at the HopErrorRateHigh alert or the dashboard to find the failing hop."
+        - alert: JourneyLatencyP95High
+          expr: |
+            histogram_quantile(0.95, sum by (le, journey) (rate(istio_request_duration_milliseconds_bucket{reporter="source", source_workload="istio-ingressgateway", journey!~"none|other"}[1m])))
+              > 2000
+          for: 1m
+          labels: { severity: warning, scope: journey }
+          annotations:
+            summary: "Journey {{ $labels.journey }}: p95 {{ $value | humanize }} ms"
+            description: "p95 end-to-end latency of this journey is above 2 s."

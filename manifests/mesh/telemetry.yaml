@@ -1,0 +1,33 @@
+# Mesh-wide telemetry (root namespace = applies to every sidecar and gateway).
+apiVersion: telemetry.istio.io/v1
+kind: Telemetry
+metadata:
+  name: mesh-default
+  namespace: istio-system
+spec:
+  tracing:
+    - providers: [{ name: otel-tracing }]
+      # 100% from Envoy; the OTel Collector keeps errors + slow + ~10% (tail sampling).
+      randomSamplingPercentage: 100
+      customTags:
+        baggage:                       # collector turns this into span.journey / span.channel
+          header: { name: baggage, defaultValue: "" }
+  accessLogging:
+    - providers: [{ name: otel-als }]  # every request -> Loki (with response flags)
+    - providers: [{ name: envoy }]     # stdout (kubectl logs): failures only
+      filter:
+        expression: "response.code >= 400 || response.code == 0"
+  metrics:
+    - providers: [{ name: prometheus }]
+      overrides:
+        # journey/channel as metric labels. Values are mapped from a FIXED list, so a
+        # client cannot create new label values. Never add IDs here.
+        # To add a journey: add it here, in the collector's transform regex, and as a gateway route.
+        - match: { metric: REQUEST_COUNT, mode: CLIENT_AND_SERVER }
+          tagOverrides: &tags
+            journey:
+              value: "has(request.headers.baggage) ? (request.headers['baggage'].contains('journey=fund-transfer') ? 'fund-transfer' : request.headers['baggage'].contains('journey=balance-check') ? 'balance-check' : request.headers['baggage'].contains('journey=card-payment') ? 'card-payment' : request.headers['baggage'].contains('journey=login') ? 'login' : request.headers['baggage'].contains('journey=loan-application') ? 'loan-application' : 'other') : 'none'"
+            channel:
+              value: "has(request.headers.baggage) ? (request.headers['baggage'].contains('channel=mobile') ? 'mobile' : request.headers['baggage'].contains('channel=web') ? 'web' : request.headers['baggage'].contains('channel=atm') ? 'atm' : 'other') : 'none'"
+        - match: { metric: REQUEST_DURATION, mode: CLIENT_AND_SERVER }
+          tagOverrides: *tags

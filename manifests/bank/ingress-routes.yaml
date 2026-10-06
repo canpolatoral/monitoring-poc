@@ -1,0 +1,40 @@
+# Public API routes on the shared ingress gateway, one route per customer journey.
+# Each route stamps the journey (and the caller's channel) into W3C baggage. Setting the
+# header here overwrites anything the client sent, so the journey cannot be spoofed.
+# Auto-instrumented apps forward baggage, so every downstream hop sees it.
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: bank-api
+spec:
+  hosts: ["*"]
+  gateways: ["istio-ingress/bank-gateway"]
+  http:
+    - name: login
+      headers:
+        request:
+          set: { baggage: "journey=login,channel=%REQ(x-channel)%" }
+      match: [{ uri: { exact: /api/login } }]
+      rewrite: { uri: /login }
+      route: [{ destination: { host: auth-svc, port: { number: 8080 } } }]
+    - name: balance-check
+      headers:
+        request:
+          set: { baggage: "journey=balance-check,channel=%REQ(x-channel)%" }
+      match: [{ uri: { exact: /api/balance } }]
+      rewrite: { uri: /balance }
+      route: [{ destination: { host: accounts-svc, port: { number: 8080 } } }]
+    - name: fund-transfer
+      headers:
+        request:
+          set: { baggage: "journey=fund-transfer,channel=%REQ(x-channel)%" }
+      match: [{ uri: { exact: /api/transfers } }]
+      rewrite: { uri: /transfer }
+      route: [{ destination: { host: payments-svc, port: { number: 8080 } } }]
+    - name: card-payment
+      headers:
+        request:
+          set: { baggage: "journey=card-payment,channel=%REQ(x-channel)%" }
+      match: [{ uri: { exact: /api/cards/payments } }]
+      rewrite: { uri: /authorize }
+      route: [{ destination: { host: cards-svc, port: { number: 8080 } } }]

@@ -1,0 +1,107 @@
+# Central OpenTelemetry Collector (Red Hat build of OpenTelemetry uses the same CR).
+# Receives: Envoy spans (Istio "otel-tracing" provider), app spans (auto-instrumentation),
+# Envoy access logs (Istio "otel-als" provider). Sends traces to Tempo and logs to Loki.
+#
+# Sampling: Istio samples 100% and this collector decides per trace (tail sampling):
+# keep every trace with an error or a slow span, plus ~10% of everything else.
+# One replica keeps all spans of a trace together. To scale out, put a
+# loadbalancing-exporter tier (routing by trace ID) in front.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability
+---
+apiVersion: opentelemetry.io/v1beta1
+kind: OpenTelemetryCollector
+metadata:
+  name: otel
+  namespace: observability
+spec:
+  mode: deployment
+  replicas: 1
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 768Mi }
+  config:
+    receivers:
+      otlp:
+        protocols:
+          grpc: { endpoint: 0.0.0.0:4317 }
+          http: { endpoint: 0.0.0.0:4318 }
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 80
+        spike_limit_percentage: 20
+
+      # Journey/channel come from W3C baggage set at the ingress gateway and forwarded
+      # by the auto-instrumented apps. Envoy records the raw header as span attribute
+      # "baggage"; turn it into clean attributes. Only the fixed journey list is accepted.
+      transform/journey:
+        error_mode: ignore
+        trace_statements:
+          - context: span
+            statements:
+              - merge_maps(attributes, ExtractPatterns(attributes["baggage"], "journey=(?P<journey>fund-transfer|balance-check|card-payment|login|loan-application)"), "upsert") where attributes["baggage"] != nil
+              - delete_key(attributes, "baggage")
+        log_statements:
+          - context: log
+            statements:
+              - merge_maps(attributes, ExtractPatterns(attributes["baggage"], "journey=(?P<journey>fund-transfer|balance-check|card-payment|login|loan-application)"), "upsert") where attributes["baggage"] != nil
+              - delete_key(attributes, "baggage")
+              # Loki indexes resource attributes: name the stream after the Envoy's workload.
+              - set(resource.attributes["service.name"], attributes["workload"]) where attributes["workload"] != nil
+              - set(resource.attributes["k8s.namespace.name"], attributes["namespace"]) where attributes["namespace"] != nil
+
+      tail_sampling:
+        decision_wait: 15s
+        num_traces: 20000
+        expected_new_traces_per_sec: 50
+        # Spans that arrive after a trace's decision (sidecars and apps flush on their own
+        # timers) must follow that decision. Without this cache they start a "new" trace and
+        # get sampled again at 10%, which leaves most stored traces with missing hops.
+        decision_cache:
+          sampled_cache_size: 100000
+          non_sampled_cache_size: 100000
+        policies:
+          - name: keep-errors
+            type: status_code
+            status_code: { status_codes: [ERROR] }
+          - name: keep-5xx
+            type: string_attribute
+            string_attribute: { key: http.status_code, values: ["5.."], enabled_regex_matching: true }
+          - name: keep-envoy-failure-flags      # any Envoy span with UF, UH, UT, URX, NR, ... ("-" = none)
+            type: ottl_condition
+            ottl_condition:
+              error_mode: ignore
+              span:
+                - attributes["response_flags"] != nil and attributes["response_flags"] != "-"
+          - name: keep-slow
+            type: latency
+            latency: { threshold_ms: 1500 }
+          - name: baseline-10pct
+            type: probabilistic
+            probabilistic: { sampling_percentage: 10 }
+
+      batch:
+        send_batch_size: 1024
+        timeout: 2s
+
+    exporters:
+      otlp/tempo:
+        endpoint: tempo-tempo.tracing.svc.cluster.local:4317
+        tls: { insecure: true }
+      otlphttp/loki:
+        endpoint: http://loki.logging.svc.cluster.local:3100/otlp
+
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, transform/journey, tail_sampling, batch]
+          exporters: [otlp/tempo]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, transform/journey, batch]
+          exporters: [otlphttp/loki]
