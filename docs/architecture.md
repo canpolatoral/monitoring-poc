@@ -108,6 +108,38 @@ shared keys (section 18).
   Python `contextvar`, a Java thread-local) and writes it into the outgoing header. Without the
   agent, notify-svc's sidecar would receive no `traceparent` and start a new trace. Rows 5 and 7
   share parent 4, so they are siblings: the two calls payments-svc makes.
+- **Where a component's own span ID lives.** A `traceparent` header only ever carries one span
+  ID: the sender's. A component's own span ID is *not* in the request it receives; it does not
+  exist yet, the component generates it. It then appears in two places: in the **span record**
+  the component sends to the collector, and in the **header of its next outgoing call**.
+  Example, the payments sidecar on the call to notify:
+
+  ```text
+                         +-------------------------------+
+   incoming header       |  payments sidecar (Envoy)     |      outgoing header
+   traceparent:          |                               |      traceparent:
+   00-f0b98398...-       | 1 reads parent-id c5a7545b    |      00-f0b98398...-
+     c5a7545b...-01 ---> | 2 generates its OWN span ID   | --->   a3583a0a...-01
+     ^ the CALLER's ID   |   a3583a0a (random 8 bytes)   |        ^ MY span ID
+       (my parent)       | 3 writes it into the next call|          (notify's parent)
+                         +---------------+---------------+
+                                         | 4 PUSH span record (OTLP) to the collector
+                                         v
+                          { traceId:      f0b9839816c71c1a...,
+                            spanId:       a3583a0a25b8976b,   <- my own span ID lives here
+                            parentSpanId: c5a7545b5b936a12,
+                            name, start, duration, status, attributes }
+  ```
+
+  | Where | Which span ID it contains |
+  |---|---|
+  | Incoming header (`parent-id`) | the caller's, i.e. my parent |
+  | My span record (in Tempo) | my own span ID **and** my parent's |
+  | Outgoing header (`parent-id`) | my own, which becomes the next hop's parent |
+
+  Think of a relay baton with one name slot: each runner reads who handed it over, notes "I got
+  it from X" in their own logbook, writes their own name on the baton and passes it on. The baton
+  shows only the last name; the full chain is in the logbooks, which are the span records in Tempo.
 - **Baggage** is a second W3C header with `key=value` pairs that travel with the request. We
   use it for `journey` and `channel` (section 8).
 - **Sampling**: the flags byte tells downstream hops whether the trace is being recorded. Envoy
