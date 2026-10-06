@@ -27,6 +27,7 @@ Contents
 16. [Measured results](#16-measured-results)
 17. [Known limits and production gaps](#17-known-limits-and-production-gaps)
 18. [Correlation: following one failure across signals](#18-correlation-following-one-failure-across-signals)
+19. [Phase 2: adding the mobile banking app](#19-phase-2-adding-the-mobile-banking-app)
 
 ---
 
@@ -708,3 +709,47 @@ The tools turn these keys into links: Grafana's Loki data source has a derived f
 Kiali opens a node's traces in Grafana; the red-dot dashboard builds all three links for the
 failing hop. A future step is **exemplars** (a trace ID attached to a metric sample), which
 would link a latency spike directly to an example trace.
+
+## 19. Phase 2: adding the mobile banking app
+
+Today the trace starts at the ingress gateway, so anything that happens on the phone or on the
+internet is invisible. To start the trace at the customer's tap:
+
+```mermaid
+flowchart LR
+  subgraph REQ[Request path: one trace ID from the phone to core banking]
+    APP[Mobile banking app<br/>OTel SDK Android / iOS] -->|"HTTPS + traceparent"| EDGE[CDN / WAF / API gateway<br/>forwards traceparent]
+    EDGE --> ROUTE[OpenShift Route] --> GW[Istio ingress gateway<br/>continues the trace,<br/>sets journey from the route] --> SVC[payments-svc ...]
+  end
+  subgraph TEL[Telemetry path: the app's own spans]
+    APP2[Mobile banking app] -->|"PUSH: OTLP/HTTPS, batched"| PUB[Public OTLP endpoint<br/>Route + auth + rate limit]
+    PUB --> EC[Edge collector<br/>redaction, sampling]
+    EC -->|"PUSH: OTLP"| IC[Internal OTel Collector] -->|PUSH| ST[(Tempo / Prometheus / Loki)]
+  end
+```
+
+1. **Instrument the app** with the OpenTelemetry SDK: `opentelemetry-android` and
+   `opentelemetry-swift`. It creates a span per user action (for example "Transfer") and
+   auto-instruments the HTTP client, which injects the W3C `traceparent` header into every API call.
+2. **Forward the header at the edge.** Every hop in front of OpenShift (CDN, WAF, external API
+   gateway, Route) must keep `traceparent` on its header allow-list. The Istio gateway then
+   *continues* the app's trace instead of starting a new one, so the phone, the network and every
+   mesh hop share one trace ID.
+3. **Receive the app's spans on a separate, internet-facing endpoint**: an OTLP/HTTP receiver
+   behind a Route, with an app token, rate limiting and request size limits. An edge collector
+   redacts (attribute allow-list), samples (all errors and crashes, about 10% of sessions) and
+   forwards to the internal collector. The internal pipeline stays private.
+4. **Metrics from client spans.** The collector's span-metrics connector turns client spans into
+   RED metrics (by app version, OS, network type: all low cardinality) next to the mesh metrics.
+   Crash reports and app logs go to Loki with the trace ID.
+
+What we gain: per tap, time on the phone vs the network vs the bank; app errors and crashes
+linked to the server trace; a red dot that can now also be "the app" or "the mobile network".
+
+Guardrails: no account numbers, names or device identifiers in spans; the journey is still set by
+the gateway from the route (the app's baggage is overwritten, as today); client-supplied trace IDs
+only come from the bank's authenticated app.
+
+Decisions to take: trust the app's trace ID (recommended, on the authenticated API), or have the
+gateway start a new trace and keep the app's ID as an attribute; the OpenTelemetry SDK versus a
+commercial RUM product; consent and sampling rate per app release.

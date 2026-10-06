@@ -155,7 +155,7 @@ docs/architecture.md          technical deep dive: concepts (signals, OpenTeleme
                               push/pull/query flows, collector, storage, correlation, dashboards
 docs/openshift-mapping.md     every component/manifest and what changes on OpenShift
 docs/runbook.md               verify a complete trace; read Envoy response flags
-docs/e2e_observability_design.pptx  design deck (slides 6-23: how the telemetry pipeline works)
+docs/e2e_observability_design.pptx  design deck (slides 6-24: how the telemetry pipeline works, mobile app in Phase 2)
 ```
 
 ## Security notes
