@@ -151,10 +151,11 @@ manifests/dashboard/          red-dot dashboard deployment (+ read-only RBAC), G
 manifests/examples/loans/     add-on used by `make demo-new-service` (new service, external system, journey)
 apps/                         bank-svc, loadgen, fault-mock, dashboard (all Python, stdlib or Flask)
 scripts/                      one script per phase (called by make)
-docs/architecture.md          technical deep dive: data flows, collector, storage, dashboards
+docs/architecture.md          technical deep dive: concepts (signals, OpenTelemetry, trace context),
+                              push/pull/query flows, collector, storage, correlation, dashboards
 docs/openshift-mapping.md     every component/manifest and what changes on OpenShift
 docs/runbook.md               verify a complete trace; read Envoy response flags
-docs/e2e_observability_design.pptx  design deck (slides 6-17: how the telemetry pipeline works)
+docs/e2e_observability_design.pptx  design deck (slides 6-21: how the telemetry pipeline works)
 ```
 
 ## Security notes

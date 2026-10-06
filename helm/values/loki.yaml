@@ -20,6 +20,14 @@ loki:
     retention_period: 48h
   pattern_ingester:
     enabled: false
+  # Retention is only enforced by the compactor; without this, retention_period is ignored
+  # and logs pile up until the volume is full.
+  compactor:
+    working_directory: /var/loki/compactor
+    compaction_interval: 10m
+    retention_enabled: true
+    retention_delete_delay: 2h
+    delete_request_store: filesystem
 singleBinary:
   replicas: 1
   persistence: { size: 5Gi }

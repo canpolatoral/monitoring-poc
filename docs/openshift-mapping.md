@@ -32,6 +32,7 @@ over almost unchanged.** What changes is *how operators are installed* (OLM inst
 
 | Local POC | OpenShift equivalent | What changes |
 |---|---|---|
+| Prometheus TSDB on a 10 Gi PVC, retention 2 days / 8 GB (`helm/values/kube-prometheus-stack.yaml`) | UWM Prometheus storage | Set `prometheus.volumeClaimTemplate` and `retention` in the `user-workload-monitoring-config` ConfigMap. |
 | kube-prometheus-stack 91.9.0 (own Prometheus, Alertmanager, Grafana) | **OpenShift monitoring with user workload monitoring** (`enableUserWorkload: true` in `cluster-monitoring-config`) | Do not install kube-prometheus-stack. Query through **Thanos Querier** `https://thanos-querier.openshift-monitoring.svc:9091` with a bearer token (ServiceAccount with `cluster-monitoring-view`). |
 | `PodMonitor istio-proxies-monitor`, one per mesh namespace (`manifests/monitoring/podmonitor-base`, `ns/*`) | Same manifest (copied from the OSSM 3 docs) | UWM only lets a PodMonitor select pods in its own namespace, which is why there is one per namespace already. Add a `ns/<name>` folder per mesh namespace. |
 | `ServiceMonitor istiod-monitor` in `istio-system` | Same | None. |
@@ -48,6 +49,7 @@ over almost unchanged.** What changes is *how operators are installed* (OLM inst
 | OpenTelemetry Operator chart 0.124.1 (operator 0.160) + `OpenTelemetryCollector otel` (`manifests/tracing/otel-collector.yaml`) | **Red Hat build of OpenTelemetry** operator + same CR | The Red Hat collector image includes `tail_sampling`, `transform` and `otlphttp`. Check the supported-components list for your version and drop the `collectorImage` override. One replica for tail sampling; to scale out, add a `loadbalancing` exporter tier routing by trace ID. |
 | `Instrumentation bank-auto` (`manifests/tracing/instrumentation.yaml`) + pod annotations `instrumentation.opentelemetry.io/inject-python` | Same | Auto-instrumentation is supported for Java, Node.js, Python, .NET, Go (Go needs privileges). For the real Java services, use `inject-java` to get JDBC spans. |
 | Istio providers `otel-tracing` / `otel-als` in `meshConfig.extensionProviders` | Same | None. |
+| Loki retention 48 h enforced by the compactor (`compactor.retention_enabled`, `helm/values/loki.yaml`) | LokiStack `spec.limits.global.retention` | The Loki Operator runs the compactor for you; set retention days per tenant or stream in the LokiStack CR. |
 | Loki 3.6 single binary (Helm `grafana/loki`) | **Loki Operator** + `LokiStack` (object storage) | Logs reach Loki through the OTel Collector's `otlphttp` exporter. With LokiStack, point it at the LokiStack gateway OTLP endpoint (tenant `application`, bearer token), or send Envoy stdout logs with the cluster logging `ClusterLogForwarder` instead. Stream labels: `service_name`, `k8s_namespace_name`. |
 
 ## External systems

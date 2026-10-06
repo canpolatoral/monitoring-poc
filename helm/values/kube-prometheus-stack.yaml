@@ -16,6 +16,15 @@ prometheus:
     scrapeInterval: 15s
     evaluationInterval: 15s
     retention: 2d
+    retentionSize: 8GB                 # stay below the volume size; oldest blocks go first
+    # Persistent TSDB: metrics survive pod restarts (OpenShift UWM: set volumeClaimTemplate in
+    # the user-workload-monitoring-config ConfigMap).
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests: { storage: 10Gi }
     resources:
       requests: { cpu: 100m, memory: 512Mi }
       limits:   { memory: 2Gi }

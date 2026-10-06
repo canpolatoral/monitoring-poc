@@ -8,6 +8,7 @@ quoted here was measured on that POC. For the component-by-component move to Ope
 
 Contents
 
+0. [Concepts: metrics, logs, traces, OpenTelemetry, trace context](#0-concepts)
 1. [Architecture overview](#1-architecture-overview)
 2. [Technology stack](#2-technology-stack)
 3. [Signal sources: Envoy and the OTel agent](#3-signal-sources-envoy-and-the-otel-agent)
@@ -25,6 +26,80 @@ Contents
 15. [Data protection](#15-data-protection)
 16. [Measured results](#16-measured-results)
 17. [Known limits and production gaps](#17-known-limits-and-production-gaps)
+18. [Correlation: following one failure across signals](#18-correlation-following-one-failure-across-signals)
+
+---
+
+## 0. Concepts
+
+### Metrics, logs and traces
+
+| | Metrics | Traces | Logs |
+|---|---|---|---|
+| What it is | Numbers aggregated over time: counters and histograms with labels, sampled every 15 s | One request followed end to end: a tree of spans that share a trace ID | One record per event: timestamp, text, fields |
+| Example here | `istio_requests_total{source_workload="payments-svc", destination_service_name="core-banking", response_code="504"}` | gateway → payments-svc → core banking, 3.0 s of 3.0 s on the last hop | `"POST /ledger/transfers" 504 UT upstream=core-banking 3001ms trace_id=2ba91a03...` |
+| Cost | Cheap: one time series per label combination, not per request | Medium: we keep errors and about 10% (tail sampling) | Highest volume: one line per request |
+| Answers | **That** something is wrong, and on which hop | **Where** the time went inside one transaction | **Why**: response flag, upstream, error detail |
+| Store / query | Prometheus / PromQL | Tempo / TraceQL | Loki / LogQL |
+
+Metrics find the red dot, traces show where the time went, logs say why. They are linked by
+shared keys (section 18).
+
+### OpenTelemetry (and OpenTracing)
+
+- **OpenTracing** (2016) was a vendor-neutral *API* for tracing. **OpenCensus** (2018, Google)
+  covered metrics and tracing with its own SDKs. In 2019 they **merged into OpenTelemetry**
+  (CNCF). OpenTracing was archived in 2022; new work uses OpenTelemetry.
+- OpenTelemetry defines:
+  - the **API** (create spans, metrics, logs) and the **SDK** (sampling, batching, exporting);
+  - **auto-instrumentation agents** that wrap common frameworks (Flask, `requests`, JDBC)
+    without code changes and propagate context;
+  - **OTLP**, one wire protocol for all three signals over gRPC (4317) or HTTP (4318);
+  - the **Collector**: receivers → processors → exporters;
+  - **semantic conventions**: standard attribute names (`service.name`,
+    `http.status_code`, `db.system`).
+- In this stack: Envoy speaks OTLP natively (mesh spans and access logs), the OpenTelemetry
+  Operator injects the agent into app pods, and the Collector tags, samples and routes
+  everything to Tempo and Loki. Because everything speaks OTLP, any backend can be swapped.
+
+### Trace context: trace ID, span ID, traceparent, baggage
+
+- A **span** is one operation: name, start time, duration, status, attributes, its own
+  **span ID** (8 bytes) and the span ID of its **parent**.
+- A **trace** is all spans with the same **trace ID** (16 bytes, 32 hex characters). The first
+  hop that sees the request (the ingress gateway) creates it at random; every later hop reuses it.
+- **Context propagation**: every outbound call carries the W3C `traceparent` header, so the next
+  hop knows which trace and which parent span it belongs to:
+
+  ```text
+  traceparent: 00-2ba91a03eb16935db767e177972f85b8-b7ad6b7169203331-01
+               |  |                                |                |
+               |  trace-id (16 bytes, same for     parent-id        flags (01 = sampled)
+               |  the whole transaction)           (8 bytes, the
+               version                             calling span)
+  ```
+
+- Envoy creates and forwards `traceparent` for traffic it proxies. The app must copy it from
+  the incoming request to its outgoing calls; the OTel agent does that. A service without the
+  agent breaks the trace in two, even inside the mesh.
+- **Baggage** is a second W3C header with `key=value` pairs that travel with the request. We
+  use it for `journey` and `channel` (section 8).
+- **Sampling**: the flags byte tells downstream hops whether the trace is being recorded. Envoy
+  records everything; the collector decides afterwards what to keep (section 7).
+
+### Who opens the connection: push, pull, query
+
+| Data | Direction of data | Who opens the connection | Mechanism |
+|---|---|---|---|
+| Envoy metrics → Prometheus | sidecar → Prometheus | **Prometheus (pull)** | HTTP GET `:15020/stats/prometheus` every 15 s |
+| istiod metrics → Prometheus | istiod → Prometheus | **Prometheus (pull)** | HTTP GET `:15014/metrics` |
+| Envoy spans → Collector | sidecar → collector | **Envoy (push)** | OTLP/gRPC 4317 |
+| App spans → Collector | app → collector | **OTel agent (push)** | OTLP/HTTP 4318 |
+| Envoy access logs → Collector | sidecar → collector | **Envoy (push)** | OTLP/gRPC 4317 (access-log sink) |
+| Collector → Tempo | collector → Tempo | **Collector (push)** | OTLP/gRPC 4317 |
+| Collector → Loki | collector → Loki | **Collector (push)** | OTLP/HTTP `/otlp` |
+| Alerts → Alertmanager | Prometheus → Alertmanager | **Prometheus (push)** | HTTP API v2 |
+| Views ← stores | store → view | **The view (query)** | PromQL, TraceQL, LogQL over HTTP, on demand |
 
 ---
 
@@ -32,7 +107,8 @@ Contents
 
 Three signals leave every hop of a transaction. **Metrics are pulled** (Prometheus scrapes
 each sidecar). **Traces and logs are pushed** over OTLP to one OpenTelemetry Collector, which
-routes them to Tempo and Loki. All three carry the same keys (source, destination, journey,
+pushes them on to Tempo and Loki. **Views query** the stores on demand. In the diagram, solid
+arrows are pushes or pulls (label says which), dotted arrows are queries. All three carry the same keys (source, destination, journey,
 trace ID), which is what lets every view jump from one signal to another.
 
 ```mermaid
@@ -61,19 +137,19 @@ flowchart LR
     RD[Red-dot dashboard]
     AM[Alertmanager]
   end
-  ENV -- metrics :15020 --> PM --> TSDB
-  ISTIOD -- metrics :15014 --> PM
-  ENV -- spans --> OTLP
-  AGT -- spans --> OTLP
-  ENV -- access logs --> OTLP
+  ENV -->|"PULL: scraped :15020"| PM --> TSDB
+  ISTIOD -->|"PULL: scraped :15014"| PM
+  ENV -->|"PUSH: spans (OTLP)"| OTLP
+  AGT -->|"PUSH: spans (OTLP)"| OTLP
+  ENV -->|"PUSH: access logs (OTLP)"| OTLP
   OTLP --> OC
-  OC -- traces --> TEMPO
-  OC -- logs --> LOKI
-  TSDB --> PROMR --> AM
-  TSDB --> KIALI & GRAF & RD
-  TEMPO --> KIALI & GRAF & RD
-  LOKI --> GRAF & RD
-  AM --> RD
+  OC -->|"PUSH: traces (OTLP)"| TEMPO
+  OC -->|"PUSH: logs (OTLP/HTTP)"| LOKI
+  TSDB --> PROMR -->|"PUSH: alerts"| AM
+  TSDB -.->|"QUERY: PromQL"| KIALI & GRAF & RD
+  TEMPO -.->|"QUERY: TraceQL"| KIALI & GRAF & RD
+  LOKI -.->|"QUERY: LogQL"| GRAF & RD
+  AM -.->|"QUERY: API v2"| RD
 ```
 
 The mesh provides the hop-level view for free: every pod already has an Envoy sidecar, so
@@ -185,6 +261,9 @@ sequenceDiagram
   P->>AM: firing alerts
 ```
 
+Direction: **pull**. Prometheus opens the connection to every sidecar; nothing in the pod sends
+metrics anywhere.
+
 **What declares the scrape.** Two CRs, both copied from the OSSM 3 documentation:
 
 - `PodMonitor istio-proxies-monitor` (`manifests/monitoring/podmonitor-base/`), **one per mesh
@@ -241,6 +320,9 @@ flowchart LR
   OC -- tail sampling --> T[(Tempo)]
 ```
 
+Direction: **push** all the way: Envoy and the agent send to the collector, the collector sends
+to Tempo. Views query Tempo.
+
 1. The ingress gateway starts the trace (W3C `traceparent`) and creates the root server span
    plus a client span to the service.
 2. Each sidecar creates a server span (inbound) and client spans (outbound). Envoy tags each
@@ -262,6 +344,8 @@ collector. At bank scale, size the collector accordingly, or use head sampling a
 rate combined with tail sampling.
 
 ## 6. Logs pipeline (push)
+
+Direction: **push**: Envoy sends to the collector, the collector sends to Loki. Views query Loki.
 
 1. Envoy's OpenTelemetry access-log sink (`envoyOtelAls`) sends one log record per request
    (HTTP) or per connection (TCP) over OTLP/gRPC to the collector. Each record has a text body
@@ -395,14 +479,19 @@ Two Istio 1.30 behaviours we hit and that apply on OpenShift too:
 
 | Signal | Store | Format on disk | POC storage | Retention (POC) | OpenShift production |
 |---|---|---|---|---|---|
-| Metrics | Prometheus | TSDB: in-memory head chunks + write-ahead log (WAL); every 2 h the head is cut into an immutable block (index + chunk files + tombstones), later compacted into larger blocks | **emptyDir** (lost if the pod restarts) | 2 days | UWM Prometheus on a PVC; queries through Thanos Querier |
+| Metrics | Prometheus | TSDB: in-memory head chunks + write-ahead log (WAL); every 2 h the head is cut into an immutable block (index + chunk files + tombstones), later compacted into larger blocks | **10 Gi persistent volume** (`storageSpec.volumeClaimTemplate`) | 2 days or 8 GB, whichever comes first | UWM Prometheus on a PVC; queries through Thanos Querier |
 | Traces | Tempo (monolithic) | Incoming spans to a WAL; completed traces flushed into **Apache Parquet** blocks (`vParquet4`, columnar, one row per trace) with bloom filters for trace-ID lookups; compactor merges blocks | 5 Gi PV, `backend: local` (`/var/tempo/wal`, `/var/tempo/blocks`) | 14 days (Tempo default, 336 h) | TempoStack on S3-compatible object storage (ODF / MinIO); TempoMonolithic acceptable for the pilot |
-| Logs | Loki (single binary) | Log lines grouped per stream (label set) into compressed **chunks**; a **TSDB index** maps labels to chunks; structured metadata stored with the lines | 5 Gi PV, `object_store: filesystem` (`/var/loki/chunks`) | `retention_period: 48h` set, but **not enforced** (compactor retention not enabled) | LokiStack on object storage, retention by tenant/stream |
+| Logs | Loki (single binary) | Log lines grouped per stream (label set) into compressed **chunks**; a **TSDB index** maps labels to chunks; structured metadata stored with the lines | 5 Gi PV, `object_store: filesystem` (`/var/loki/chunks`) | 48 h, **enforced by the compactor** (`retention_enabled: true`, runs every 10 min, deletes 2 h after marking) | LokiStack on object storage, retention by tenant/stream |
 | Alerts | Alertmanager | Notification log and silences, snapshot file | emptyDir | while firing; silences until expiry | platform or UWM Alertmanager |
 | Dashboards | Grafana | Dashboards as code (ConfigMap with label `grafana_dashboard`), SQLite for users and settings | in the pod | in Git | Grafana Operator `GrafanaDashboard` CRs |
 
 Query languages: PromQL (metrics), TraceQL (traces, `GET /api/search?q=...` on Tempo :3200),
 LogQL (logs, Loki :3100).
+
+Verified: a Prometheus sample read back identically after deleting the Prometheus pod (data on
+the PVC), and Loki's running config shows `retention_enabled: true` with the compactor active.
+Loki retention only works through the compactor: `limits_config.retention_period` alone is
+silently ignored.
 
 ## 11. Alerting
 
@@ -515,10 +604,42 @@ the decision-cache fix.
 
 | Item | Impact | Fix |
 |---|---|---|
-| Prometheus on emptyDir | POC metrics lost on pod restart | `prometheusSpec.storageSpec` with a PVC (OpenShift UWM: configure storage in `user-workload-monitoring-config`) |
-| Loki retention not enforced | Logs kept until the 5 Gi volume fills | Enable compactor retention (`compactor.retention_enabled: true`, delete request store); on OpenShift set retention in LokiStack |
+| ~~Prometheus on emptyDir~~ (fixed) | Was: metrics lost on pod restart | Now a 10 Gi PVC; on OpenShift UWM configure storage in `user-workload-monitoring-config` |
+| ~~Loki retention not enforced~~ (fixed) | Was: logs kept until the volume filled | Now compactor retention enabled; on OpenShift set retention in the LokiStack CR |
 | Single collector replica | Tail sampling limited by one pod | Two-tier collectors with `loadbalancing` exporter by trace ID |
 | Istio histogram buckets | p95 of a hop capped by a 3 s timeout reads about 4.7 s | Trust traces for exact durations, or add finer buckets via Telemetry API |
 | TCP hops | No spans and no journey label for the database hop | JDBC spans from the Java agent on real services; access log + TCP metrics meanwhile |
 | Journey list | New journeys need three edits | Intentional (bounded label cardinality) |
 | Fault-injection buttons | Demo only | Remove `POST /api/faults` and the mock admin calls on OpenShift |
+
+## 18. Correlation: following one failure across signals
+
+Correlation works because the three signals share keys:
+
+| Key | Where it appears | Links |
+|---|---|---|
+| **Hop** (`source_workload` + `destination_service_name`; `upstream_cluster` on spans and logs) | metrics, Envoy spans, access logs | an alert on a hop → the spans and log lines of that hop |
+| **Trace ID** (W3C, 16 bytes) | spans, access logs (`%TRACE_ID%`) | a log line ↔ its trace, both ways |
+| **Journey** (baggage → label/attribute/field) | metrics, spans, access logs | filter all three to one customer journey |
+| **Time window** | all | narrow every search to the minutes of the incident |
+
+Following the "core banking slow" failure:
+
+```mermaid
+flowchart LR
+  A["1 Metrics<br/>HopErrorRateHigh:<br/>payments-svc to core-banking 38%"] -->|"hop + time"| B["2 Traces (TraceQL)<br/>error spans on that hop"]
+  B --> C["3 The trace<br/>3.0 of 3.0 s on core banking<br/>trace ID 2ba91a03..."]
+  C -->|"trace ID"| D["4 Logs (LogQL)<br/>access log: 504, flag UT"]
+  D -->|"hop"| E["5 Owner<br/>observability.bank/owner:<br/>core banking team"]
+```
+
+```text
+TraceQL  { span.upstream_cluster =~ ".*core-banking.poc.internal.*" && status = error }
+LogQL    {service_name="payments-svc"} | trace_id="2ba91a03eb16935db767e177972f85b8"
+```
+
+The tools turn these keys into links: Grafana's Loki data source has a derived field that opens
+`trace_id` in Tempo; the Tempo data source has `tracesToLogsV2`, which opens a span's Loki lines;
+Kiali opens a node's traces in Grafana; the red-dot dashboard builds all three links for the
+failing hop. A future step is **exemplars** (a trace ID attached to a metric sample), which
+would link a latency spike directly to an example trace.
