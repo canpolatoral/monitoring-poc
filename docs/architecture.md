@@ -72,16 +72,42 @@ shared keys (section 18).
   hop knows which trace and which parent span it belongs to:
 
   ```text
-  traceparent: 00-2ba91a03eb16935db767e177972f85b8-b7ad6b7169203331-01
+  traceparent: 00-f0b9839816c71c1a6d5cf853fd44ea44-c5a7545b5b936a12-01
                |  |                                |                |
                |  trace-id (16 bytes, same for     parent-id        flags (01 = sampled)
-               |  the whole transaction)           (8 bytes, the
-               version                             calling span)
+               |  the whole transaction)           (8 bytes: the
+               version                             CALLER's span ID)
   ```
 
 - Envoy creates and forwards `traceparent` for traffic it proxies. The app must copy it from
   the incoming request to its outgoing calls; the OTel agent does that. A service without the
   agent breaks the trace in two, even inside the mesh.
+- **Where the span ID is**: the header's `parent-id` field *is* a span ID: the span ID of the
+  caller. Each hop reads it, creates a **new** span ID for its own span, records the incoming
+  value as that span's parent, and writes **its own** span ID into the header of the next call.
+  The trace ID never changes; the `parent-id` changes on every hop.
+
+  Worked example: payments-svc calls notify-svc (real trace `f0b9839816c71c1a6d5cf853fd44ea44`
+  from the POC, 200 ms end to end):
+
+  | # | Span (who records it) | Span ID | Parent span ID | `parent-id` it writes on its outgoing call |
+  |---|---|---|---|---|
+  | 1 | ingress gateway, server | `3883effb70da8a5c` | (root) | |
+  | 2 | ingress gateway, client | `e9c757822d8649cc` | `3883effb70da8a5c` | `e9c757822d8649cc` |
+  | 3 | payments sidecar, server | `55692cc06a0eeb9e` | `e9c757822d8649cc` | `55692cc06a0eeb9e` (to the app) |
+  | 4 | payments app, `POST /transfer` (OTel agent) | `f8fea851cf1486e0` | `55692cc06a0eeb9e` | |
+  | 5 | payments app, call core banking (agent) | `70f5a1ed76dfd980` | `f8fea851cf1486e0` | `70f5a1ed76dfd980` |
+  | 7 | payments app, call notify-svc (agent) | `c5a7545b5b936a12` | `f8fea851cf1486e0` | **`c5a7545b5b936a12`** |
+  | 8 | payments sidecar, client to notify | `a3583a0a25b8976b` | **`c5a7545b5b936a12`** | `a3583a0a25b8976b` |
+  | 9 | notify sidecar, server | `1f72f872e5221901` | `a3583a0a25b8976b` | `1f72f872e5221901` (to the app) |
+  | 10 | notify app, `POST /notify` (agent) | `6ffc79c30976757e` | `1f72f872e5221901` | |
+
+  The step that needs the agent is 4 → 7: the incoming request and the outgoing call to notify
+  are two unrelated connections for Envoy. Only the code inside payments-svc knows that one
+  caused the other. The agent keeps the current span in the request's execution context (a
+  Python `contextvar`, a Java thread-local) and writes it into the outgoing header. Without the
+  agent, notify-svc's sidecar would receive no `traceparent` and start a new trace. Rows 5 and 7
+  share parent 4, so they are siblings: the two calls payments-svc makes.
 - **Baggage** is a second W3C header with `key=value` pairs that travel with the request. We
   use it for `journey` and `channel` (section 8).
 - **Sampling**: the flags byte tells downstream hops whether the trace is being recorded. Envoy
