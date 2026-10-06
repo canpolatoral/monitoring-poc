@@ -68,7 +68,10 @@ fails, for a whole customer journey or a single service, using the service mesh.
 - prototype/red-dot-static.html: static diagram of a detected failure.
 - prototype/red-dot-animated.html: animated traffic, failure scenarios, journey and
   service drill-down (simulated data).
-- docs/e2e_observability_design.pptx: Phase 1 design deck.
+- docs/e2e_observability_design.pptx: Phase 1 design deck. Slides 6-17 explain the telemetry
+  pipeline in detail (stack, data flow, scraping, collector, tail sampling, journey tagging,
+  storage, access logs, views, measured results, move to OpenShift).
+- docs/architecture.md: technical deep dive of how the stack works; docs/images: screenshots.
 
 ## Local kind POC (upstream mirror of the OpenShift design)
 Status (2026-10-06): all 5 phases built and verified; user asked to run phases 2-5 back to
