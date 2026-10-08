@@ -21,7 +21,7 @@ Contents
 10. [Storage: where each signal lives](#10-storage-where-each-signal-lives)
 11. [Alerting](#11-alerting)
 12. [Visualization and correlation](#12-visualization-and-correlation)
-13. [The red-dot dashboard backend](#13-the-red-dot-dashboard-backend)
+13. [The red-dot dashboard: data sources and processing](#13-the-red-dot-dashboard-data-sources-and-processing)
 14. [Ports and protocols](#14-ports-and-protocols)
 15. [Data protection](#15-data-protection)
 16. [Measured results](#16-measured-results)
@@ -216,6 +216,8 @@ flowchart LR
   KIALI & GRAF & RD -.->|"QUERY: TraceQL"| TEMPO
   GRAF & RD -.->|"QUERY: LogQL"| LOKI
   RD -.->|"QUERY: API v2"| AM
+  K8S[(Kubernetes API:<br/>Services, ServiceEntries)]
+  RD -.->|"QUERY: list, annotations"| K8S
 ```
 
 The mesh provides the hop-level view for free: every pod already has an Envoy sidecar, so
@@ -589,44 +591,182 @@ gateway namespace).
 
 ![Grafana journey dashboard](images/grafana-journey.png)
 
-## 13. The red-dot dashboard backend
+## 13. The red-dot dashboard: data sources and processing
 
-`apps/dashboard/server.py` (Python standard library only) serves the UI and `GET /api/state`.
+The red-dot dashboard (`apps/dashboard`) **stores no telemetry**. A small backend
+(`server.py`, Python standard library only) is a read-only client of the stores the platform
+already runs. On each request it queries them, joins the results into one JSON document
+(`GET /api/state`), and a static page (`static/index.html`) draws it. Nothing is installed or
+written anywhere; deleting the dashboard removes no data.
 
-**Topology discovery (nothing hard-coded).** Every 20 s the backend runs:
+### 13.1 Where the data comes from
 
-```promql
-sum by (source_workload, source_workload_namespace, destination_service_name,
-        destination_service_namespace, destination_workload, journey, channel)
-  (increase(istio_requests_total{reporter="source"}[15m])) > 0
+```mermaid
+flowchart LR
+  UI[Browser UI<br/>index.html] -.->|"QUERY: GET /api/state every 3 s"| BE[Backend<br/>server.py]
+  BE -.->|"QUERY: PromQL /api/v1/query"| PROM[(Prometheus<br/>Istio metrics)]
+  BE -.->|"QUERY: list Services, ServiceEntries"| K8S[(Kubernetes API<br/>annotations)]
+  BE -.->|"QUERY: /api/v2/alerts"| AM[(Alertmanager<br/>firing alerts)]
+  BE -.->|"QUERY: TraceQL /api/search"| TEMPO[(Tempo<br/>traces)]
+  BE -.->|"QUERY: LogQL /loki/api/v1/query"| LOKI[(Loki<br/>Envoy access logs)]
+  BE -.->|"POC only: GET/POST :9000/fault"| MOCK[Fault mocks<br/>admin API]
 ```
 
-and the same over `istio_tcp_connections_opened_total`. Each row is a hop. Node identity:
-destinations are named by Kubernetes Service (or ServiceEntry host); sources only by workload,
-so rows where `destination_workload` is known teach the mapping workload → service. Canonical
-service labels are not used because they become `unknown` exactly when an external system
-fails. Node kind: gateway (`GATEWAY_WORKLOADS`), external (ServiceEntry host or
-`PassthroughCluster`), service, or channel (`channel` label at the gateway). Depth is the
-longest call chain from a gateway; the UI draws columns channel | gateway | services by depth
-| external. Journeys are the `journey` label values.
+Every arrow starts at the caller: the browser calls the backend, the backend calls each store,
+and the data comes back in the response. No store ever calls the dashboard.
 
-**Display metadata** comes from annotations, read through a read-only ClusterRole
-(`services`, `serviceentries`):
-`observability.bank/display-name`, `description`, `owner` (who the red dot is routed to),
-`hidden`.
+| # | Source | Endpoint (in-cluster default; env var) | Auth | What the dashboard reads | Feeds on screen | Refresh (cache) | If it is down |
+|---|---|---|---|---|---|---|---|
+| 1 | **Prometheus** | `http://kps-prometheus.monitoring.svc:9090/api/v1/query` (`PROM_URL`) | none in the POC; on OpenShift Thanos needs a bearer token (small backend change, see 13.9) | Istio metrics from the client-side sidecars: `istio_requests_total`, `istio_request_duration_milliseconds_bucket`, `istio_tcp_connections_opened_total` (all `reporter="source"`) | Topology (nodes, edges, journeys), every number (req/s, error %, p95, flags, TCP), edge colours, red dot, KPIs | topology 20 s, live numbers 2 s | **Required**: `/api/state` returns 502; the UI keeps the last good view and its live indicator turns *stale* after 10 s, *down* after 30 s |
+| 2 | **Kubernetes API** | `https://kubernetes.default.svc` `/api/v1/services`, `/apis/networking.istio.io/v1/serviceentries` | pod ServiceAccount token; ClusterRole `red-dot-topology-reader` (get/list only) | Annotations `observability.bank/display-name`, `description`, `owner`, `hidden` | Node names and subtitles, owner team in the evidence, hidden nodes | 60 s | Raw names (`payments-svc`, `core-banking.poc.internal`), no owner |
+| 3 | **Alertmanager** | `http://kps-alertmanager.monitoring.svc:9093/api/v2/alerts?active=true&silenced=false&inhibited=false` (`ALERTMANAGER_URL`) | none in the POC | Firing alerts with label `scope` = `hop` or `journey` (rules `e2e-red-dot`) | "Alert" lines in the detection-signals panel | 5 s | No alert lines; the rest works |
+| 4 | **Tempo** | `http://tempo-tempo.tracing.svc:3200/api/search` (`TEMPO_URL`) | none in the POC | TraceQL search results (trace ID, root span, duration, matching spans) | "Trace" evidence line; failing-traces list | 10 s | No trace evidence |
+| 5 | **Loki** | `http://loki.logging.svc:3100/loki/api/v1/query` (`LOKI_URL`) | none in the POC | Counts of Envoy access-log lines by `response_flags` | "Access log" evidence line (flag, meaning, owner) | 10 s | No log evidence |
+| 6 | Fault mocks *(POC only)* | `http://<mock>.poc.internal:9000/fault`, `/reset` (`MOCK_ADMIN_TEMPLATE`) | none | Current fault per mock | Scenario buttons and their state | 3 s | That mock shows an error state; remove on OpenShift |
 
-**Live state** (cached 2 s): request rate, 5xx %, p95 and Envoy flags per hop (1-minute
-rate), per journey and per channel.
+The public URLs used only for links (`KIALI_PUBLIC_URL`, `GRAFANA_PUBLIC_URL`,
+`PROM_PUBLIC_URL`, `ALERTMANAGER_PUBLIC_URL`) are never called by the backend; the browser opens
+them when you click a signal.
 
-**Red-dot rule.** A hop is *bad* at error rate ≥ 5% (amber at ≥ 1% or p95 ≥ 1 s, the same
-thresholds as the alerts). The red dot is the **deepest** bad hop: a bad hop whose target has
-no bad outgoing hop. Upstream hops that fail only because of it are drawn amber.
+### 13.2 Prometheus queries (topology and numbers)
 
-**Evidence ("detection signals")** for each red dot: the metrics view (as Kiali shows it), the
-two most relevant alerts, a Tempo trace
-(`{ span.upstream_cluster =~ ".*core-banking.poc.internal.*" && status = error }`, showing how
-much of the trace was spent on the hop), and Loki flag counts
-(`sum by (response_flags)(count_over_time(... [2m]))`) with the owner team.
+`BY` below is `source_workload, source_workload_namespace, destination_service_name,
+destination_service_namespace`. All queries use client-side metrics (`reporter="source"`),
+because calls to external systems are only seen by the caller's sidecar.
+
+**Topology discovery** (every 20 s, `DISCOVERY_WINDOW` = 15 m). A hop exists if it carried
+traffic in the window, so a hop that stops completely during an outage stays on screen:
+
+| Purpose | Query |
+|---|---|
+| HTTP hops, journeys, channels | `sum by (BY, destination_workload, journey, channel) (increase(istio_requests_total{reporter="source"}[15m])) > 0` |
+| TCP hops (databases) | `sum by (BY, destination_workload) (increase(istio_tcp_connections_opened_total{reporter="source"}[15m])) > 0` |
+| Workload → service names | `sum by (BY, destination_workload) (increase(istio_requests_total{reporter="source"}[15m])) > 0` (cached 60 s) |
+
+**Live numbers** (every 2 s, `RATE_WINDOW` = 1 m, seven queries in parallel):
+
+| Key | Query | Used for |
+|---|---|---|
+| `req` | `sum by (BY, destination_workload, journey, channel) (rate(istio_requests_total{reporter="source"}[1m]))` | req/s per hop, per journey, per channel |
+| `err` | `sum by (BY, journey, channel) (rate(istio_requests_total{reporter="source", response_code=~"5.."}[1m]))` | error % (5xx / all) |
+| `p95` | `histogram_quantile(0.95, sum by (le, BY) (rate(istio_request_duration_milliseconds_bucket{reporter="source"}[1m])))` | p95 per hop |
+| `p95j` | same, `by (le, BY, journey)` | p95 per hop within a journey |
+| `p95c` | same, `by (le, source_workload, source_workload_namespace, channel)` | p95 per channel edge (gateway) |
+| `flags` | `sum by (BY, response_flags) (rate(istio_requests_total{reporter="source", response_flags!="-"}[1m])) > 0` | Envoy flags per hop (UT, UF, UH, URX, ...) |
+| `tcp` | `sum by (BY, destination_workload, response_flags) (rate(istio_tcp_connections_opened_total{reporter="source"}[1m]))` | TCP connections/s and failed share (flag ≠ `-`) |
+| totals | `histogram_quantile(0.95, sum by (le) (rate(istio_request_duration_milliseconds_bucket{reporter="source", source_workload=~"<gateways>"}[1m])))` | KPI p95 (cached 5 s) |
+
+### 13.3 Kubernetes API (names and owners)
+
+The backend lists all `Service` and `ServiceEntry` objects and keeps only annotations with the
+`observability.bank/` prefix: Services are keyed by namespace and name, ServiceEntries by each
+host in `spec.hosts`. These are the only Kubernetes objects it reads (ClusterRole
+`red-dot-topology-reader`: `get`, `list` on `services` and `serviceentries`). It never reads
+Secrets, Pods or ConfigMaps.
+
+### 13.4 Alertmanager (alerts)
+
+`GET /api/v2/alerts?active=true&silenced=false&inhibited=false`. Only alerts labelled
+`scope: hop` or `scope: journey` are used (the five `e2e-red-dot` rules). The panel shows the
+two most relevant first: alerts on the red-dot hop, then journey alerts, then critical before
+warning; the rest are summarised as a count. Silenced alerts are left out, so silencing in
+Alertmanager also quietens the dashboard.
+
+### 13.5 Tempo (traces)
+
+| Purpose | TraceQL | Window |
+|---|---|---|
+| Failing-traces list | `{ status = error } \| select(span.journey)` (40 most recent) | 15 min |
+| Evidence for an HTTP red hop | `{ span.upstream_cluster =~ ".*<host or service>.*" && status = error }` | 5 min |
+| Evidence for a TCP red hop (Envoy does not trace TCP) | `{ resource.service.name = "<client workload>" && status = error }` | 5 min |
+
+From the newest matching trace the backend takes the trace duration and the longest matching
+span. It writes "3.0 s of 3.0 s spent waiting on payments-svc to Core banking" (slow upstream),
+or "the call fails after 2 ms" (refused or ejected upstream). The link opens the trace in
+Grafana Explore.
+
+### 13.6 Loki (access logs)
+
+`sum by (response_flags) (count_over_time({service_name="<client workload>"} | upstream_cluster=~".*<host>.*" | response_flags!="-" | response_flags!="" [2m]))`
+
+The most frequent flag is translated (UT = upstream request timeout, UF = connection failure,
+UH = no healthy upstream, URX = retry limit exceeded, ...) and combined with the target's owner
+annotation: "Envoy flag UT (upstream request timeout) on 412 calls in 2 min. Routed to the core
+banking team." The link opens the same LogQL in Grafana Explore.
+
+### 13.7 From raw data to the screen
+
+1. **Identity.** Sources are named by workload, destinations by Service (or ServiceEntry
+   host). Rows where `destination_workload` is known teach the mapping workload → Service, so
+   both ends of a hop get the same node ID. Canonical-service labels are not used, because they
+   turn `unknown` exactly when an external system fails.
+2. **Topology.** Nodes are typed: gateway (`GATEWAY_WORKLOADS`), mesh service, external
+   (ServiceEntry host or `PassthroughCluster`), channel (the `channel` label at the gateway).
+   Services are placed by their longest call depth from the gateway. A TCP hop has no journey
+   label, so it joins the journeys that reach its client. Nodes first seen after start-up get a
+   *new* badge for 15 minutes.
+3. **Numbers.** The live queries are summed per hop, per (hop, journey) and per channel.
+   Error % = 5xx ÷ all requests (TCP: failed ÷ opened connections).
+4. **State** (same thresholds as the alert rules): *bad* at error ≥ 5 %; *warn* at error ≥ 1 %,
+   p95 ≥ 1 s, or any Envoy flag; otherwise healthy.
+5. **Red dot.** The deepest bad hop: a bad hop whose target has no bad outgoing hop. Hops
+   upstream of it, which fail only because of it, are drawn amber/red but are not the red dot.
+6. **Evidence.** For each red dot the backend adds the metric line, up to two alerts, the
+   Tempo line and the Loki line. Evidence calls are best effort and cached 10 s, so one failing
+   source never breaks the view.
+
+| On screen | Comes from |
+|---|---|
+| Nodes, edges, columns, journey buttons | Prometheus (discovery queries) + Kubernetes annotations |
+| Edge colour, thickness, moving dots | Prometheus live queries (state, req/s) |
+| KPI strip (req/s, error %, p95) | Prometheus, gateway hops only |
+| Pulsing red node, status bar "Red dot: …" | Red-dot rule over the Prometheus numbers |
+| Owner team | Kubernetes annotation `observability.bank/owner` |
+| Signals: "Kiali" line | Prometheus numbers of the red hop (links to the Kiali graph) |
+| Signals: "Alert" lines | Alertmanager |
+| Signals: "Trace" line | Tempo |
+| Signals: "Access log" line | Loki + owner annotation |
+| Failing-traces list | Tempo |
+| Scenario buttons | Fault mocks (POC only) |
+
+### 13.8 Timing
+
+```mermaid
+sequenceDiagram
+  participant UI as Browser
+  participant BE as Backend
+  participant P as Prometheus
+  participant K as Kubernetes API
+  participant A as Alertmanager
+  participant T as Tempo
+  participant L as Loki
+  loop every 3 s
+    UI->>BE: GET /api/state
+    BE->>P: discovery queries (if cache older than 20 s)
+    BE->>K: list Services, ServiceEntries (if older than 60 s)
+    BE->>P: 7 live queries in parallel (if older than 2 s)
+    BE->>A: active alerts (if older than 5 s)
+    BE->>T: failing traces, trace for each red hop (if older than 10 s)
+    BE->>L: flag counts for each red hop (if older than 10 s)
+    BE-->>UI: JSON: nodes, edges, journeys, red dots, signals, traces
+  end
+```
+
+The caches mean many open browsers cost the stores the same as one. From the moment a fault
+starts: the edge turns red after about 30 s (1-minute rate); alerts appear after their
+1-minute `for`; trace and log evidence follow within 1–2 minutes, as spans and log lines arrive.
+
+### 13.9 Configuration and OpenShift
+
+Everything is set by environment variables (`manifests/dashboard/dashboard.yaml`; defaults in
+`server.py`): `PROM_URL`, `TEMPO_URL`, `LOKI_URL`, `ALERTMANAGER_URL`, `RATE_WINDOW` (1m),
+`DISCOVERY_WINDOW` (15m), `GATEWAY_WORKLOADS` (istio-ingressgateway), `NEW_BADGE_SECONDS`
+(900), plus the public link URLs. On OpenShift only the endpoints change: `PROM_URL` →
+Thanos Querier (`https://thanos-querier.openshift-monitoring.svc:9091`) with a ServiceAccount
+token (`cluster-monitoring-view`; the backend must be extended to send it as an
+`Authorization: Bearer` header, which it does not do yet), Tempo → the TempoStack/TempoMonolithic query endpoint, Loki
+→ the LokiStack gateway, Alertmanager → the platform or user-workload Alertmanager; remove
+`MOCK_ADMIN_TEMPLATE` and the fault API. See `docs/openshift-mapping.md`.
 
 ![Red-dot dashboard during a core banking slowdown](images/red-dot-dashboard.png)
 
